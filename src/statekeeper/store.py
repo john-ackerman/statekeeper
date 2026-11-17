@@ -222,7 +222,19 @@ class SqliteStore:
         self.db.close()
 
     def _migrate(self) -> None:
+        # A database made before the earlier recall system was named "legacy" carries a CHECK on shadow_injections.source that refuses the new name, and
+        # SQLite cannot alter a CHECK: move the table aside, let the schema recreate it, copy the rows across (any non-statekeeper source becomes "legacy").
+        old = self.db.execute("SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'shadow_injections'").fetchone()
+        if old and "'legacy'" not in old[0]:
+            self.db.execute("DROP INDEX IF EXISTS idx_shadow_inj_turn")
+            self.db.execute("ALTER TABLE shadow_injections RENAME TO shadow_injections_old")
         self.db.executescript(SCHEMA.read_text(encoding="utf-8"))
+        if self.db.execute("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'shadow_injections_old'").fetchone():
+            self.db.execute("INSERT OR IGNORE INTO shadow_injections (id, turn_ref, source, hook_event, kind, text, created_utc) "
+                            "SELECT id, turn_ref, CASE source WHEN 'statekeeper' THEN 'statekeeper' ELSE 'legacy' END, hook_event, kind, text, created_utc FROM shadow_injections_old")
+            self.db.execute("DROP TABLE IF EXISTS shadow_injections_old")
+        # the import source was renamed the same way; the key is the importer's SOURCE
+        self.db.execute("UPDATE OR IGNORE import_map SET source = 'legacy-fact' WHERE source <> 'legacy-fact'")
         self.db.execute("INSERT OR IGNORE INTO schema_version (version, applied_utc) VALUES (1, ?)", (now(),))
 
     def _act(self, actor: str) -> None:

@@ -65,7 +65,7 @@ def parse(text: str) -> dict:
 def call_haiku(prompt: str) -> str:
     """No user settings, so none of the user's hooks run; an empty working directory, so no project settings either."""
     with tempfile.TemporaryDirectory() as cwd:
-        r = subprocess.run(["claude", "-p", "--setting-sources", "project", "--model", MODEL, "--tools", "", "--no-session-" + "persist" + "ence", "--output-format", "json"],
+        r = subprocess.run(["claude", "-p", "--setting-sources", "project", "--model", MODEL, "--tools", "", "--no-session-persistence", "--output-format", "json"],
                            input=prompt, capture_output=True, text=True, timeout=300, cwd=cwd, encoding="utf-8")
     if r.returncode != 0:
         said = r.stderr.strip()
@@ -79,8 +79,9 @@ def call_haiku(prompt: str) -> str:
 
 
 class Extractor:
-    def __init__(self, store: Store, call: Callable[[str], str] = call_haiku, session: str | None = None):
-        self.store, self.call, self.session = store, call, session or f"extract-{uuid.uuid4().hex[:8]}"
+    def __init__(self, store: Store, call: Callable[[str], str] = call_haiku, session: str | None = None, user_source: str = "user"):
+        """`user_source` is the `source` value that marks a message as written by the person (anything else is treated as agent output)."""
+        self.store, self.call, self.session, self.user_source = store, call, session or f"extract-{uuid.uuid4().hex[:8]}", user_source
 
     def prompt(self, m: dict) -> str:
         things = self.store.things()
@@ -117,7 +118,7 @@ class Extractor:
             rec.setdefault("error", f"invalid JSON after retry: {why}")
             rec["seconds"] = round(time.time() - t0, 1)
             return rec
-        agent = m.get("source") != "Alex"
+        agent = m.get("source") != self.user_source
         facts = got.get("facts") if isinstance(got.get("facts"), list) else []
         rec["facts_seen"] = len(facts)
 

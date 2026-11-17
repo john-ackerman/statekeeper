@@ -24,7 +24,7 @@ class Live(unittest.TestCase):
             t = Path(d, "p", "s", "subagents")
             t.mkdir(parents=True)
             (t / "agent-abc.jsonl").write_text(json.dumps({"type": "assistant", "message": {"content": [{"type": "text", "text": "x"}], "stop_reason": "tool_use"}}), encoding="utf-8")
-            r = observe_everything(s, list_prs=list_prs, get_pr=lambda repo, n: payload(), get_build=lambda ref: build(id=100 + int(ref.split("/")[2])),
+            r = observe_everything(s, repos=("ExampleOrg/ExampleApp", "ExampleOrg/ExampleWorkspace"), build_repos=("ExampleApp",), list_prs=list_prs, get_pr=lambda repo, n: payload(), get_build=lambda ref: build(id=100 + int(ref.split("/")[2])),
                                    transcripts=recent_transcripts(Path(d)))
         self.assertEqual((2, 2, 1), (r["prs"], r["builds"], r["agents"]))
         self.assertEqual(1, len(r["errors"]))
@@ -35,7 +35,7 @@ class Live(unittest.TestCase):
     def test_a_second_observation_scores_verified_outcomes(self):
         s = fresh_store()
         for _ in range(2):
-            observe_everything(s, repos=("o/ExampleApp",), list_prs=lambda r: [1], get_pr=lambda repo, n: payload(), get_build=lambda ref: None)
+            observe_everything(s, repos=("o/ExampleApp",), build_repos=("ExampleApp",), list_prs=lambda r: [1], get_pr=lambda repo, n: payload(), get_build=lambda ref: None)
         self.assertEqual(3, len([o for o in s.outcomes(kind="verified_right")]))
 
     def test_old_transcripts_are_not_listed(self):

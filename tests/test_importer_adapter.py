@@ -123,3 +123,28 @@ class Adapter(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class ImportLegacyTool(unittest.TestCase):
+    def run_tool(self, export, *extra):
+        import tempfile
+        with tempfile.TemporaryDirectory() as d:
+            src, db = Path(d, "export.json"), Path(d, "out", "s.db")
+            src.write_text(json.dumps(export), encoding="utf-8")
+            r = subprocess.run([sys.executable, str(ROOT / "tools" / "import_legacy.py"), "--export", str(src), "--into", str(db), *extra],
+                               capture_output=True, text=True, env=dict(os.environ, PYTHONUTF8="1"), timeout=60)
+            return r, db.exists()
+
+    def test_a_valid_export_is_imported(self):
+        r, created = self.run_tool(EXPORT)
+        self.assertEqual(0, r.returncode, r.stderr)
+        self.assertTrue(created)
+        self.assertIn("imported:", r.stdout)
+
+    def test_an_export_missing_a_part_is_refused_and_validate_only_writes_nothing(self):
+        bad, created = self.run_tool({"concepts": []})
+        self.assertEqual(2, bad.returncode)
+        self.assertFalse(created)
+        ok, created = self.run_tool(EXPORT, "--validate-only")
+        self.assertEqual(0, ok.returncode)
+        self.assertFalse(created)

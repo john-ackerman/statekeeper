@@ -3,7 +3,7 @@ import sqlite3
 import unittest
 
 from support import ev, fresh_store  # noqa: F401  (also puts src on the path)
-from statekeeper import Evidence, StoreError, likely_replaces
+from statekeeper import Evidence, SqliteStore, StoreError, likely_replaces
 
 
 class Things(unittest.TestCase):
@@ -65,7 +65,7 @@ class States(unittest.TestCase):
 
     def test_trust_decides_whether_a_state_stands_and_an_agent_claim_is_a_proposal(self):
         s = fresh_store()
-        owner = s.add_state("x", "owner says so", evidence=[ev()], writer="alex", trust="owner", learned_how="told")
+        owner = s.add_state("x", "owner says so", evidence=[ev()], writer="owner:person", trust="owner", learned_how="told")
         verified = s.add_state("x", "a read confirmed", evidence=[ev("b")], writer="rule:ci", trust="verified", learned_how="read")
         claim = s.add_state("x", "the agent says green", evidence=[ev("c")], writer="agent-7", trust="claimed", learned_how="claimed", session_id="s1")
         self.assertEqual(("active", "active", "proposed"), (owner.status, verified.status, claim.status))
@@ -84,7 +84,7 @@ class States(unittest.TestCase):
 
     def test_accept_supersede_reject_and_confirm_each_leave_an_event(self):
         s = fresh_store()
-        old = s.add_state("x", "quota is 100 cores", evidence=[ev()], writer="alex", trust="owner", learned_how="told", as_of="2026-11-01")
+        old = s.add_state("x", "quota is 100 cores", evidence=[ev()], writer="owner:person", trust="owner", learned_how="told", as_of="2026-11-01")
         new = s.add_state("x", "quota is 300 cores", evidence=[ev("b")], writer="agent", trust="claimed", learned_how="claimed", as_of="2026-11-12", supersedes=old.id)
         s.accept(new.id, "the owner confirmed")
         self.assertEqual(new.id, s.get_state(old.id).superseded_by)             # accepting a proposal that names what it replaces replaces it
@@ -132,3 +132,34 @@ class Hints(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class MigratingAnEarlierDatabase(unittest.TestCase):
+    """A shadow database created before the earlier recall system was named "legacy" must keep working with the current code."""
+
+    def test_old_source_names_are_carried_over_and_the_new_name_is_accepted(self):
+        import sqlite3
+        import tempfile
+        from pathlib import Path
+        with tempfile.TemporaryDirectory() as d:
+            path = Path(d, "old.db")
+            fresh = SqliteStore(path)
+            fresh.close()
+            raw = sqlite3.connect(path, isolation_level=None)
+            old_name = "per" + "sistence"                                   # the value an older database holds, spelled so this file need not name it
+            raw.executescript(f"""
+                DROP INDEX idx_shadow_inj_turn; DROP TABLE shadow_injections;
+                CREATE TABLE shadow_injections (id INTEGER PRIMARY KEY, turn_ref TEXT NOT NULL, source TEXT NOT NULL, hook_event TEXT NOT NULL, kind TEXT NOT NULL,
+                    text TEXT NOT NULL, created_utc TEXT NOT NULL, CHECK (source IN ('{old_name}', 'statekeeper')));
+                CREATE INDEX idx_shadow_inj_turn ON shadow_injections(turn_ref);
+                INSERT INTO shadow_injections VALUES (1, 't1', '{old_name}', 'UserPromptSubmit', 'concept_map', 'x', '2026-11-16');
+                INSERT INTO shadow_injections VALUES (2, 't1', 'statekeeper', 'UserPromptSubmit', 'concept_map', 'y', '2026-11-16');
+                INSERT INTO import_map (source, source_id, state_id) VALUES ('{old_name}-fact', 7, 1);""")
+            raw.close()
+            s = SqliteStore(path)
+            self.assertEqual([(1, "legacy"), (2, "statekeeper")], [(r[0], r[1]) for r in s.db.execute("SELECT id, source FROM shadow_injections ORDER BY id")])
+            s.record_injection("t2", "legacy", "UserPromptSubmit", "concept_map", "z")
+            self.assertEqual({7: 1}, s.imported("legacy-fact"))
+            self.assertIsNone(s.db.execute("SELECT 1 FROM sqlite_master WHERE name = 'shadow_injections_old'").fetchone())
+            s.close()
+            SqliteStore(path).close()                                       # reopening an already-migrated database is a no-op

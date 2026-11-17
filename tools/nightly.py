@@ -1,7 +1,7 @@
-"""The nightly job for the shadow store: verified backup, a consolidation pass, miss detection, and an
+"""The nightly job for the shadow store: verified backup, an incremental re-import from an earlier fact store (only if configured), a consolidation pass, miss detection, and an
 outcome report. Each step is independent and logged; a failing step does not stop the next. Not wired to any scheduler by this file.
 
-    python tools/nightly.py [--home ~/.claude/statekeeper] [--skip-embed]
+    python tools/nightly.py [--home ~/.claude/statekeeper] [--skip-import] [--skip-embed]
 
 Reports go to <home>/reports/outcomes-<date>.json; backups (kept: newest 14) to <home>/backups.
 """
@@ -19,9 +19,10 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "src"))
 sys.path.insert(0, str(ROOT / "tools"))
 
-from statekeeper import SqliteStore  # noqa: E402
+from statekeeper import SqliteStore, config  # noqa: E402
 from statekeeper.consolidate import run_pass  # noqa: E402
 from statekeeper.embed import HttpEmbedder  # noqa: E402
+from statekeeper.importer import import_export  # noqa: E402
 from statekeeper.misses import log_misses  # noqa: E402
 from statekeeper.proc import run  # noqa: E402
 from statekeeper.report import build_report  # noqa: E402
@@ -39,6 +40,7 @@ def step(log: list, name: str, fn):
 def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--home", default=str(Path.home() / ".claude" / "statekeeper"))
+    ap.add_argument("--skip-import", action="store_true")
     ap.add_argument("--skip-embed", action="store_true")
     args = ap.parse_args()
     home = Path(args.home)
@@ -61,6 +63,15 @@ def main() -> int:
             old.unlink()
         return str(dest)
 
+    def reimport():
+        command = config.get_list("legacy_export_command")
+        if not command:
+            return {"skipped": "no legacy_export_command configured"}
+        out = run(command, capture_output=True, text=True, encoding="utf-8", timeout=900)
+        if out.returncode != 0:
+            raise RuntimeError(f"export command failed: {out.stderr.strip()[:200]}")
+        return import_export(SqliteStore(db), json.loads(out.stdout))
+
     def consolidate():
         return run_pass(SqliteStore(db), HttpEmbedder())
 
@@ -81,6 +92,8 @@ def main() -> int:
 
     step(log, "backup", backup)
     step(log, "observe-writers", observe)
+    if not args.skip_import:
+        step(log, "reimport-legacy", reimport)
     if not args.skip_embed:
         step(log, "consolidate", consolidate)
         step(log, "misses", misses)

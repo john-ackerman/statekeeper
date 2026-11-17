@@ -4,7 +4,7 @@ Read A first. These sections are design notes with leans, not a finished spec.
 
 ## 10. Shared store: identity as state, provenance, conflicts (open design questions, with leans)
 
-Decided by the owner: one central store; every session and agent is an equal writer; the agent itself and other people are ordinary things whose state follows the same rules (A section 2); findings live in the shared store, so handoff reports should not be needed; a handoff stays an allowed option and is scored by the outcome log (A section 15).
+Decisions taken: one central store; every session and agent is an equal writer; the agent itself and other people are ordinary things whose state follows the same rules (A section 2); findings live in the shared store, so handoff reports should not be needed; a handoff stays an allowed option and is scored by the outcome log (A section 15).
 
 1. **Provenance of each state.** Each state records `writer` (a rule name, an agent, the owner), `session_id`, `learned_how` (read from an artifact, inferred, told by the owner, claimed by an agent), the evidence references, and a verify handle.
    Lean: required columns, not free text; a state without a writer cannot be stored. Session id is the harness's, never the agent's own claim.
@@ -34,7 +34,7 @@ Decided by the owner: one central store; every session and agent is an equal wri
 
 **Why not a model call per turn:** a Haiku call per surfaced candidate would roughly double context cost and add seconds of latency; stages 0 and 1 are local and cheap by construction. A model call stays for extraction only (already the case), off the per-turn path.
 
-**Guardrails.** A learned score can only reorder or filter what retrieval already found; it cannot write states, change trust above a writer's ceiling, or touch core state. Every learned parameter or model version is a row with a revert; the held-out the owner-judged set (A section 15) is the regression gate before any change is kept.
+**Guardrails.** A learned score can only reorder or filter what retrieval already found; it cannot write states, change trust above a writer's ceiling, or touch core state. Every learned parameter or model version is a row with a revert; the held-out set of turns judged by the owner (A section 15) is the regression gate before any change is kept.
 
 
 ## 12. Consolidation as an ongoing, validated process (2026-11-16)
@@ -45,10 +45,10 @@ The store must not fill with the same fact many times, and it must not lose dist
 
 **Reversible.** `Store.reopen(state, reason)` undoes a merge; a reopening is an event and is counted by validation. The two thresholds live in `param_history`, so changing one is a logged, revertible row.
 
-**Validation from outcomes, not opinion** (`consolidate.validate`, `learn.suggest`): per merge, did a person reopen it; did a miss get logged against the survivor (a restated input matched it but it did not surface, A section 15); did the merged state's evidence still support the survivor. A high reopened fraction (with at least 20 merges) suggests raising `dedupe_threshold`; many merges with no reopenings and no misses suggest the threshold is safe but never lower automatically. Held-out the owner-judged pairs (the 33 merges at 0.95 are the first sample) stay the regression gate.
+**Validation from outcomes, not opinion** (`consolidate.validate`, `learn.suggest`): per merge, did a person reopen it; did a miss get logged against the survivor (a restated input matched it but it did not surface, A section 15); did the merged state's evidence still support the survivor. A high reopened fraction (with at least 20 merges) suggests raising `dedupe_threshold`; many merges with no reopenings and no misses suggest the threshold is safe but never lower automatically. Owner-judged merge pairs held out for the purpose (the 33 merges at 0.95 are the first sample) stay the regression gate.
 
 **Cadence when wired:** after extraction runs and nightly; a pass that would merge more than 50 states stops and reports instead, since a sudden spike means the threshold or an extractor changed.
 
 ## 13. Automated detection of misses (2026-11-16)
 
-Signals that the store failed the user, found without anyone judging, logged as `missed` outcomes (`misses.log_misses`): the user restates something within a day; a restated input matches no stored state (an extraction miss); it matches a stored state that did not surface (a surfacing miss); a state changed after its thing last surfaced and was then only omitted. Live turn text for this comes from the shadow adapters (`turn_texts`). Measured on the owner's 371 past messages: at cosine 0.88 the restatement detector over-fires on topical similarity of long dictated messages (31 hits, about a quarter genuine); at 0.93 it finds 3, all genuine repeats. Expect low recall until live data accrue; more signals planned: the user re-asking a question the agent already answered, and the user correcting the agent ("no, I meant...") as `contradicted`.
+Signals that the store failed the user, found without anyone judging, logged as `missed` outcomes (`misses.log_misses`): the user restates something within a day; a restated input matches no stored state (an extraction miss); it matches a stored state that did not surface (a surfacing miss); a state changed after its thing last surfaced and was then only omitted. Live turn text for this comes from the shadow adapters (`turn_texts`). Measured on one user's 371 past messages: at cosine 0.88 the restatement detector over-fires on topical similarity of long dictated messages (31 hits, about a quarter genuine); at 0.93 it finds 3, all genuine repeats. Expect low recall until live data accrue; more signals planned: the user re-asking a question the agent already answered, and the user correcting the agent ("no, I meant...") as `contradicted`.

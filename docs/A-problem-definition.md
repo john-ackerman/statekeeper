@@ -1,6 +1,6 @@
 # A. Problem definition: a current-state layer for agents
 
-Revision 3, 2026-11-16 (working name statekeeper). It says what must be true, not how it is built. Any measured numbers in the documents are indicative, from small samples judged by one person.
+Revision 3, 2026-11-16. This document says what must be true, not how it is built. Any measured numbers in the documents are indicative, from small samples judged by one person. "The owner" means the person who runs the agent and has the final say over what it treats as settled.
 
 ## 1. Goal
 
@@ -119,21 +119,20 @@ Re-implementing the model's world knowledge; a knowledge graph for its own sake;
 | Free-text extraction | seconds per input, off the hot path | structured inputs 0 s |
 | Dropped commitments | commitments open at turn end that the Stop pass missed, on a replay of 50 turns | 0 |
 
-## 14. What I could not verify
+## 14. Known limits (not verified)
 
 - Relevance was judged by one person on a small sample; a second judge would make the numbers worth more.
 - Whether agents behave better with surfaced state than with surfaced fragments.
 - Claude Code hook payloads for tool events (PostToolUse) as an input source: not tested for each tool's payload.
-- Git-history invalidation (section 3) and structured agent claims (section 6) are designed here from the requirements.
+- Git-history invalidation (section 3) and structured agent claims (section 6) are designed from the requirements, not yet measured in use.
 
-
-## 15. The store learns from reality (added 2026-11-16, the owner)
+## 15. The store learns from reality (added 2026-11-16)
 
 The store must improve automatically from what actually happens, not from a person judging test series.
 
 - **Outcomes from day one.** For every state that is surfaced, log what happened to it: surfaced, omitted (dropped by a cap or budget), used, contradicted, verified_right, verified_wrong, missed (a state changed or was needed and did not surface). A handoff is just another artifact: it can be scored the same way (source `handoff:<ref>`), so whether handoffs are still useful is measured, not assumed.
 - **Ground truth is outside the system**: git, PR and CI reads, artifact checks through verify handles, the agent's later behaviour. The store never grades itself; a signal that only the store produced does not count.
-- **A fixed held-out set of the owner-judged turns** is a regression benchmark only. It is never used to tune and never grows from tuning runs.
+- **A fixed held-out set of turns judged by the owner** is a regression benchmark only. It is never used to tune and never grows from tuning runs.
 - **Learn parameters, not weights, first**: extractor thresholds, the relevance floor, per-writer trust ceilings, per-kind volatility half-lives. Every change is a row (who, why, previous value), small, and reversible with one call.
 - **Measure before automating.** Feedback is sparse and delayed: a suggestion needs a minimum amount of evidence (`learn.py` thresholds), is reported first, applied by a person, and automated only once the same suggestion has proved right repeatedly.
 - **Staged option for a small local learned component** is in B section 11.

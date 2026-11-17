@@ -9,7 +9,7 @@ def answer(*facts):
     return json.dumps({"facts": [dict({"claim": "fact", "is_state": False, "as_of": None, "object": None}, **f) for f in facts]})
 
 
-def msg(text, source="Alex", id=1):
+def msg(text, source="user", id=1):
     return {"id": id, "source": source, "created": "2026-11-16 10:00:00", "content": text}
 
 
@@ -48,7 +48,7 @@ class Filtering(unittest.TestCase):
     def test_a_person_saying_something_is_waiting_is_not_dropped_but_instructions_are(self):
         s = fresh_store()
         call = lambda p: answer({"thing": "PR 9", "text": "is awaiting review from Sam"}, {"thing": "PR 9", "text": "merge it if CI is green", "claim": "instruction"})
-        rec = Extractor(s, call=call).extract(msg("PR 9 is awaiting review from Sam. Merge it if CI is green.", source="Alex"))
+        rec = Extractor(s, call=call).extract(msg("PR 9 is awaiting review from Sam. Merge it if CI is green.", source="user"))
         self.assertEqual(["is awaiting review from Sam"], [w["text"] for w in rec["written"]])
         self.assertEqual({"instruction": 1}, rec["rejected"])
 
@@ -57,14 +57,14 @@ class Filtering(unittest.TestCase):
         s = fresh_store()
         observe_agent(s, {"agent": "agent-abc", "status": "working"})
         call = lambda p: answer({"thing": "agent-abc", "text": "is still running the tests"}, {"thing": "agent-abc", "text": "owns the billing branch"})
-        rec = Extractor(s, call=call).extract(msg("agent-abc is still running the tests and owns the billing branch", source="Alex"))
+        rec = Extractor(s, call=call).extract(msg("agent-abc is still running the tests and owns the billing branch", source="user"))
         self.assertEqual(["owns the billing branch"], [w["text"] for w in rec["written"]])
         self.assertEqual({"owned-by-writer": 1}, rec["rejected"])
 
     def test_a_proposal_that_reads_as_done_is_kept_but_marked_proposed(self):
         s = fresh_store()
         call = lambda p: answer({"thing": "the board", "text": "gets a new column", "claim": "proposal"}, {"thing": "the board", "text": "the owner wants a filter", "claim": "proposal"})
-        rec = Extractor(s, call=call).extract(msg("add a column, and I want a filter", source="Alex"))
+        rec = Extractor(s, call=call).extract(msg("add a column, and I want a filter", source="user"))
         self.assertEqual(["Proposed: gets a new column", "the owner wants a filter"], [w["text"] for w in rec["written"]])
         self.assertEqual({}, rec["rejected"])
 

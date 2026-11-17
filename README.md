@@ -12,7 +12,7 @@
 6. One shared picture across sessions and agents, with provenance, so an agent's claim is never mistaken for a verified fact.
 7. The agent itself and other people are ordinary state, not special machinery.
 
-Problem statement: `docs/A-problem-definition.md`. Design notes: `docs/B-design.md`.
+Problem statement: `docs/A-problem-definition.md`. Design notes: `docs/B-design.md`. Adopting it next to an existing recall system: `docs/C-incremental-adoption.md`, `docs/E-adoption-plan.md`, `docs/F-adoption-bar.md`.
 
 ## Layout
 
@@ -20,9 +20,10 @@ Problem statement: `docs/A-problem-definition.md`. Design notes: `docs/B-design.
 src/statekeeper/   store (SQLite), schema, claims, retrieval (names + meaning), embeddings client,
                    extractor, commitments, consolidation/dedupe, miss detection, outcome report, writers/
 adapters/claude_code/  thin Claude Code hook adapters (they call only the Store interface; nothing installs them by itself)
-tools/             command-line helpers (smoke test, reports, optional hook installer, observers)
+tools/             command-line helpers (smoke test, reports, replay and miss/extraction sampling, legacy importer, optional hook installer, observers)
 tests/             unittest suite, standard library only
-docs/              A problem definition, B design notes
+docs/              A problem definition, B design notes, C/E/F adopting statekeeper alongside an existing recall system
+local/             git-ignored: your own adapters and notes for your install (never committed)
 ```
 
 ## Running it
@@ -36,7 +37,7 @@ python tools/smoke.py                    # end-to-end check on a temporary datab
 
 Environment: `STATEKEEPER_DB` (default `out/statekeeper.db`), `STATEKEEPER_EMBED_URL` (default `http://127.0.0.1:8081/v1`), `STATEKEEPER_EMBED_MODEL` (default `bge-small`). On Windows set `PYTHONUTF8=1`.
 
-Some live writers (`src/statekeeper/writers/`) read GitHub through `gh` and Azure DevOps through `az` (read only) and are configured through `STATEKEEPER_ADO_ORG` / `STATEKEEPER_ADO_PROJECT`. The free-text extractor calls `claude -p` headlessly. Neither is needed for the tests.
+Some live writers (`src/statekeeper/writers/`) read GitHub through `gh` and Azure DevOps through `az` (read only). They are configured with an optional JSON file (repositories, ADO organization and project, an export command for an earlier fact store); see `src/statekeeper/config.py` for the search order and keys. `STATEKEEPER_ADO_ORG` / `STATEKEEPER_ADO_PROJECT` override it. The free-text extractor calls `claude -p` headlessly. Neither is needed for the tests.
 
 Nothing in this repository edits Claude Code settings unless you run `tools/install_shadow_hooks.py` yourself (it merges, supports `--dry-run` and `--remove`).
 

@@ -1,8 +1,8 @@
-"""Run every live deterministic writer once (read only): The owner's open PRs, the newest ADO build of each, recently active agents. Writes to the shadow store.
+"""Run every live deterministic writer once (read only): the user's open PRs, the newest ADO build of each, recently active agents. Writes to the shadow store.
 
     python tools/observe_all.py [--db ~/.claude/statekeeper/shadow.db]
 
-ADO org/project default to the owner's (STATEKEEPER_ADO_ORG / STATEKEEPER_ADO_PROJECT override). Safe to run often; the shadow hook starts it detached at most
+Repositories, ADO org and project come from the configuration (src/statekeeper/config.py); STATEKEEPER_ADO_ORG / STATEKEEPER_ADO_PROJECT override. Safe to run often; the shadow hook starts it detached at most
 every 20 minutes while a session is active, and the nightly job runs it too.
 """
 from __future__ import annotations
@@ -15,11 +15,12 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
-from statekeeper import SqliteStore  # noqa: E402
+from statekeeper import SqliteStore, config  # noqa: E402
 from statekeeper.writers.live import observe_everything, recent_transcripts  # noqa: E402
 
-os.environ.setdefault("STATEKEEPER_ADO_ORG", "https://dev.azure.com/example-org")
-os.environ.setdefault("STATEKEEPER_ADO_PROJECT", "Example Project")
+for _env, _key in (("STATEKEEPER_ADO_ORG", "ado_org"), ("STATEKEEPER_ADO_PROJECT", "ado_project")):
+    if config.load().get(_key):
+        os.environ.setdefault(_env, str(config.load()[_key]))
 
 
 def main() -> int:

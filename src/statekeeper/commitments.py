@@ -3,7 +3,7 @@
 Pure functions over text and a list of the turn's actions; no model, no store, not wired to any hook or prompt block. A turn is an ordered list of
 events: assistant text (str) and tool calls (Action). A commitment is a sentence where the agent says it will do something; it is fulfilled when a
 LATER action in the same turn touches what it named (shared content stem) or is of the class its verb implies (a "check" is met by any read-class call).
-Precision is measured by replaying stored turns (tools/commitment_replay.py), and is the agent's own judgment until the owner reviews it.
+Precision is measured by replaying stored turns (tools/commitment_replay.py), and is the agent's own judgment until a person reviews it.
 """
 from __future__ import annotations
 

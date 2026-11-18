@@ -88,6 +88,14 @@ def main() -> int:
         found = promote(SqliteStore(db), HttpEmbedder().model)
         return {"promoted": len(found), "sample": found[:5]}
 
+    def decompose_long():
+        """Long states (notes, documents, long claims) split into atomic states under their topics (statekeeper.decompose); the long one is superseded."""
+        from statekeeper.decompose import apply, is_long, plan
+        st = SqliteStore(db)
+        todo = [x for x in st.searchable_states() if is_long(x) and x.writer != "rule:skills" and x.thing_name != "working note"
+                and not (x.volatility == "rule" and x.state_key)][:60]
+        return apply(st, plan(st, todo))
+
     def questions():
         """Requests each new durable/how-to state answers (statekeeper.questions; one model call per 15 states), then their vectors."""
         from statekeeper.questions import ensure_question_vectors, generate
@@ -147,6 +155,7 @@ def main() -> int:
         step(log, "consolidate", consolidate)
         step(log, "promote-corroborated", promote_corroborated)
         if not args.skip_questions:
+            step(log, "decompose-long", decompose_long)
             step(log, "questions", questions)
         step(log, "misses", misses)
     step(log, "report", report)

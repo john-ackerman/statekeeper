@@ -198,7 +198,7 @@ def main(argv: list[str] | None = None) -> int:
             if s.verify_handle:
                 print(f"  re-check: {s.verify_handle}")
             for e in store.evidence_of([s.id])[s.id]:
-                print(f"  evidence {e.ref_type} {e.ref}")
+                print(f"  evidence {e.ref_type} {e.ref}" + ("  (the state it was split from: `sk show " + e.ref.lstrip("#") + "` for the full source)" if e.ref_type == "state" else ""))
                 if e.excerpt:
                     print("    " + e.excerpt.replace("\n", "\n    "))
             for a, b, rel, score in store.links_of(s.id):
@@ -213,6 +213,9 @@ def main(argv: list[str] | None = None) -> int:
                                  learned_how="told" if args.owner else "claimed", session_id=_session(), object=args.object,
                                  kind="rule" if args.rule else "belief", volatility="rule" if args.rule else ("stable" if args.stable else "work"))
             print(f"added {_line(st)}")
+            from statekeeper.decompose import is_long
+            if is_long(st):
+                print("long: the nightly job will split it into atomic states (one fact each); or add them yourself, one per `sk add`")
             if near:
                 print("nearest existing (if one says the same, `sk supersede <id>` it instead and close this one):\n" + "\n".join(near))
         elif args.cmd == "supersede":

@@ -4,6 +4,7 @@
     python tools/curate.py [--db PATH] show <id>                              one state with its evidence and resolution
     python tools/curate.py [--db PATH] close <id> --reason "..." [--replaced-by N]
     python tools/curate.py [--db PATH] reopen <id> --reason "..."
+    python tools/curate.py [--db PATH] feedback <id> useful|wrong|stale|noise [--note "..."]   (also typed in chat as "sk #<id> wrong")
     python tools/curate.py [--db PATH] add <thing> "<text>" --evidence-type T --evidence-ref R [--excerpt E] [--trust owner|verified|derived]
                                        [--kind belief|rule] [--volatility work|stable|rule] [--thing-kind thing|person|agent] [--replaces N] [--object THING]
 
@@ -42,6 +43,10 @@ def main() -> int:
     r = sub.add_parser("reopen")
     r.add_argument("id", type=int)
     r.add_argument("--reason", required=True)
+    fb = sub.add_parser("feedback", help="record that a shown state was useful, wrong/stale, or noise (an outcome; the nightly job weighs it)")
+    fb.add_argument("id", type=int)
+    fb.add_argument("verdict", choices=("useful", "wrong", "stale", "noise"))
+    fb.add_argument("--note", default="")
     a = sub.add_parser("add")
     a.add_argument("thing")
     a.add_argument("text")
@@ -74,6 +79,10 @@ def main() -> int:
                 print(f"  evidence {e.ref_type} {e.ref}: {(e.excerpt or '')[:120]}")
         elif args.cmd == "close":
             print(line(store.close_state(args.id, args.reason, replaced_by=args.replaced_by, actor=args.actor)))
+        elif args.cmd == "feedback":
+            from statekeeper.usefulness import log_feedback, parse_feedback
+            n = log_feedback(store, parse_feedback(f"sk #{args.id} {args.verdict}"), source="feedback:curate", note=args.note)
+            print(f"recorded {args.verdict} for #{args.id}" if n else f"no state #{args.id}")
         elif args.cmd == "reopen":
             print(line(store.reopen(args.id, args.reason, actor=args.actor)))
         elif args.cmd == "add":

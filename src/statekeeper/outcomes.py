@@ -19,10 +19,19 @@ def _stems(text: str) -> set[str]:
     return {w[:5] for w in re.findall(r"[a-z0-9]{4,}", text.lower()) if w not in STOP}
 
 
+_PR_NAME = re.compile(r"\bPR (\d+)$")
+
+
 def used_proxy(output: str, state: State) -> bool:
-    """The output names the state's thing and carries at least one distinctive word of the state's text (beyond the thing's own name)."""
+    """The output (the answer and its tool calls) cites the state by `#id`, or names the state's thing (for a pull request, its number written as
+    #N, "PR N" or pull/N also counts) and carries at least one distinctive word of the state's text beyond the thing's own name."""
+    if re.search(rf"(?<![\w#])#{state.id}\b", output):
+        return True
     low = output.lower()
-    if state.thing_name.lower() not in low:
+    named = state.thing_name.lower() in low
+    if not named and (m := _PR_NAME.search(state.thing_name)):
+        named = bool(re.search(rf"(#|\bPR\s?|/pull/){m.group(1)}\b", output, re.I))
+    if not named:
         return False
     distinctive = _stems(state.text) - _stems(state.thing_name)
     return bool(distinctive & _stems(output))

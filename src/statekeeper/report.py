@@ -67,5 +67,9 @@ def health_text(h: dict) -> str:
     lines = [f"statekeeper live injection since {h['since']}: {flag}",
              f"prompts {h['live_prompts']}: injected {h['injected']}, quiet {h['quiet']}, mean {h['mean_injected_chars']} chars; slowest call {h['slowest_ms']} ms",
              f"session starts {h['session_starts']}, refresh failures {h['refresh_failed']}; adapter errors {h['error_count']}"]
+    if "usefulness" in h:
+        us = h["usefulness"]
+        lines.append(f"shown {us['shown']} state-turns, used {us['used']} ({us['used_pct']}%); corrections {us['contradicted']}, explicit feedback {us['explicit_feedback']}; "
+                     f"open flags {h.get('open_flags', 0)}" + (f"; shown most, never used: {', '.join(us['shown_most_unused'])}" if us["shown_most_unused"] else ""))
     lines += [f"  {e}" for e in h["errors"]]
     return "\n".join(lines) + "\n"

@@ -234,7 +234,7 @@ CREATE TABLE IF NOT EXISTS outcomes (
     detail TEXT NULL,
     params TEXT NULL,
     recorded_utc TEXT NOT NULL,
-    CHECK (kind IN ('surfaced', 'omitted', 'used', 'contradicted', 'verified_right', 'verified_wrong', 'missed'))
+    CHECK (kind IN ('surfaced', 'omitted', 'used', 'unhelpful', 'contradicted', 'verified_right', 'verified_wrong', 'missed'))
 );
 CREATE INDEX IF NOT EXISTS idx_outcomes_state ON outcomes(state_id);
 CREATE INDEX IF NOT EXISTS idx_outcomes_turn ON outcomes(turn_ref) WHERE turn_ref IS NOT NULL;

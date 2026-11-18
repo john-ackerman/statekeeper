@@ -83,8 +83,8 @@ class Handling(unittest.TestCase):
 
 class Inject(unittest.TestCase):
     def run_inject(self, prompt, db, home, flag):
-        env = dict(os.environ, STATEKEEPER_HOME=home, STATEKEEPER_DB=db, PYTHONUTF8="1", STATEKEEPER_NO_OBSERVE_IN_TESTS="1")
-        env.pop("STATEKEEPER_EMBED_URL", None)
+        env = dict(os.environ, STATEKEEPER_HOME=home, STATEKEEPER_DB=db, PYTHONUTF8="1", STATEKEEPER_NO_OBSERVE_IN_TESTS="1",
+                   STATEKEEPER_EMBED_URL="http://127.0.0.1:9/v1")      # no embedding server: deterministic, names and words only
         if flag is None:
             env.pop("STATEKEEPER_INJECT", None)
         else:
@@ -177,7 +177,7 @@ class Inject(unittest.TestCase):
             self.assertEqual("", self.run_inject(note, db, d, "1").stdout)
             first = json.loads(self.run_inject("the converter replicas?", db, d, "1").stdout)["hookSpecificOutput"]["additionalContext"]
             self.assertIn("converter fact", first)
-            self.assertEqual("", self.run_inject("the converter replicas, again?", db, d, "1").stdout)       # not its other states either
+            self.assertEqual("", self.run_inject("the converter replicas, again?", db, d, "1").stdout)       # no rotation through its other states
             st = SqliteStore(db)
             time.sleep(1.1)
             st.add_state("the converter", "converter now caps replicas at 70", evidence=[ev("m9")], writer="rule:t", trust="verified", learned_how="read")

@@ -91,6 +91,7 @@ class Item:
 class Surfaced:
     block: str
     items: list[Item]
+    named: list[int] = field(default_factory=list)   # things the input named whole (feeds the conversation-topic signal)
 
 
 def _freshness(s: State, today: datetime) -> str:
@@ -153,6 +154,10 @@ GENERIC_MENTIONS = 15    # ... and a thing whose name appears in more than this 
 SPECIFIC_MAX = 6         # a thing with at most this many standing states is specific: naming it is enough to show its current states
 CLOSE_SPELLING = 0.9     # a near spelling this close ("date picker", "stake keeper") counts as naming the thing; a looser one ("service just") does not
 MAX_STATES = 5
+TOPIC_ON = 0.6           # a thing whose conversation-topic score is at least this is what we are talking about now (see select, topic=)
+TOPIC_SLACK = 0.08       # an on-topic thing's state may sit this far under the floor, with no rare word needed
+TOPIC_NEAR = 0.04        # an on-topic thing not named in this input: its states may sit this far under the floor
+WEIGHT_SPAN = 0.10       # a usefulness weight w moves a state's meaning score by (w - 1) * WEIGHT_SPAN (w is kept in 0.5..1.1, so -0.05..+0.01)
 
 
 _PR_URL = re.compile(r"https?://github\.com/[^/\s]+/([^/\s]+)/pull/(\d+)\S*")
@@ -179,8 +184,8 @@ def candidates(store: Store, text: str, embedder: Optional[Embedder], floor: flo
 
 
 def select(store: Store, text: str, embedder: Optional[Embedder], *, floor: float, max_things: int = 3, states_each: int = 2,
-           exclude_kinds: tuple = (), exclude_names: tuple = (), skip_state_ids: frozenset = frozenset(), max_states: int = MAX_STATES
-           ) -> tuple[list[Item], list[State], list[Item]]:
+           exclude_kinds: tuple = (), exclude_names: tuple = (), skip_state_ids: frozenset = frozenset(), max_states: int = MAX_STATES,
+           topic: Optional[dict[int, float]] = None, info: Optional[dict] = None, news: frozenset = frozenset()) -> tuple[list[Item], list[State], list[Item]]:
     """State-first selection: every state shown must itself bear on the input, not merely belong to a thing whose name was said.
 
     A state qualifies when
@@ -191,8 +196,19 @@ def select(store: Store, text: str, embedder: Optional[Embedder], *, floor: floa
     Naming "the repo" or "the tool" alone surfaces nothing. Of two qualifying states about the same subject (close in meaning, or one likely replacing
     the other) only the newer is shown. Agents and people are never surfaced because their name was said (they are in the session core), but what was
     learned about them can surface by meaning; their standing rule/stable states are left out (the core already shows them).
-    Returns (items shown, all qualifying states in rank order, items dropped by the caps)."""
+    The ongoing conversation counts: `topic` maps thing ids to how much they have been named or surfaced in the last turns (decaying; see the
+    adapter). A thing at or above TOPIC_ON is what is being discussed, so a common word that names it ("board") resolves to it again: naming it is
+    still not enough alone, but its states need less meaning (TOPIC_SLACK below the floor, no rare word) to qualify, so the relevant ones surface.
+    When the conversation moves on the score decays and the word is generic again. Usefulness weights (Store.state_weights, set by the nightly job from outcomes) nudge a state's
+    meaning score by at most a few hundredths: a state shown again and again and never used, or said to be noise, needs to be a little closer.
+    Returns (items shown, all qualifying states in rank order, items dropped by the caps); `info`, when given, receives the named thing ids."""
     named = _named(store, text, exclude_kinds, exclude_names)
+    topic = topic or {}
+    on_topic = {tid for tid, v in topic.items() if v >= TOPIC_ON}
+    weights = store.state_weights() if hasattr(store, "state_weights") else {}
+    if info is not None:
+        info["named"] = [tid for tid, (_t, why, _s) in named.items() if why == "named"]
+        info["on_topic"] = sorted(on_topic)
     pool = [s for s in store.searchable_states() if s.id not in skip_state_ids]
     things: dict[int, Optional[Thing]] = {}
 
@@ -250,20 +266,29 @@ def select(store: Store, text: str, embedder: Optional[Embedder], *, floor: floa
         if t.kind in exclude_kinds and s.status == "active" and s.volatility in ("rule", "stable"):
             continue
         c = cos.get(s.id)
+        if c is not None and s.id in weights:
+            c += (weights[s.id] - 1.0) * WEIGHT_SPAN
         shared = len(asked & state_terms.get(s.id, set()))
+        topical = s.thing_id in on_topic
         own = named.get(s.thing_id)
         hit = own or (named.get(s.object_id) if s.object_id else None)
         # naming is enough on its own only for the thing's own states, spelled whole, when the thing is specific
         specific = own is not None and (own[1] == "named" or own[2] >= CLOSE_SPELLING) and standing_count.get(s.thing_id, 0) <= SPECIFIC_MAX and s.thing_id not in parents \
-            and s.thing_id not in mentioned_widely
+            and s.thing_id not in mentioned_widely and not topical    # on topic: its states must bear on this input (no rotation through them)
         if s.state_key:
             if own is not None and own[1] == "named":  # a named thing's current values; never reached by meaning alone (they are short labels)
                 scored.append((2.0, s))
             continue
-        if specific:
+        if s.id in news and own is not None:
+            scored.append((1.5, s))                                  # changed since this thing was last shown, and named again: that is news
+        elif specific:
             scored.append((1.0 + (c or 0.0) / 10, s))
         elif c is not None and c >= floor:
             scored.append((c, s))
+        elif c is not None and own is not None and topical and c >= floor - TOPIC_SLACK:
+            scored.append((c, s))                                    # the thing we are talking about, named again
+        elif c is not None and own is None and topical and c >= floor - TOPIC_NEAR:
+            scored.append((c, s))                                    # the thing we are talking about, not named this time
         elif c is not None and hit is not None and c >= floor - NAMED_SLACK and shared >= 1:
             scored.append((c, s))
         elif c is not None and shared >= 2 and c >= floor - WORD_SLACK - WORD_STEP * min(shared - 2, 1):
@@ -363,17 +388,20 @@ def _agents_line(store: Store, text: str, today: datetime, skip: frozenset) -> t
 
 def surface(store: Store, text: str, embedder: Optional[Embedder] = None, *, floor: Optional[float] = None, max_things: int = 3,
             states_each: int = 2, budget: int = 2500, today: Optional[datetime] = None, log_turn: Optional[str] = None,
-            exclude_kinds: tuple = (), exclude_names: tuple = (), skip_state_ids: frozenset = frozenset(), max_states: int = MAX_STATES) -> Surfaced:
+            exclude_kinds: tuple = (), exclude_names: tuple = (), skip_state_ids: frozenset = frozenset(), max_states: int = MAX_STATES,
+            topic: Optional[dict[int, float]] = None, news: frozenset = frozenset()) -> Surfaced:
     """The state block for an input (see `select` for what qualifies): at most `max_things` things and `max_states` states, only the newest about any
     one subject, one line each with ONE trust marker and one short evidence pointer, within `budget` characters, saying what it left out. Empty when
     nothing bears on the input."""
     today = today or datetime.now(timezone.utc)
     floor = store.get_param("relevance_floor", DEFAULT_FLOOR) if floor is None else floor
+    info: dict = {}
     items, _, dropped = select(store, text, embedder, floor=floor, max_things=max_things, states_each=states_each, exclude_kinds=exclude_kinds,
-                               exclude_names=exclude_names, skip_state_ids=skip_state_ids, max_states=max_states)
+                               exclude_names=exclude_names, skip_state_ids=skip_state_ids, max_states=max_states, topic=topic, info=info, news=news)
+    named = info.get("named", [])
     agents, agent_ids = _agents_line(store, text, today, skip_state_ids)
     if not items and not agents:
-        return Surfaced("", [])
+        return Surfaced("", [], named)
     lines = ["Current state bearing on this input (#id = state; [how sure · evidence]; raw history is not shown):"]
     shown: list[Item] = []
     omitted: list[str] = [i.thing.name for i in dropped]
@@ -418,7 +446,7 @@ def surface(store: Store, text: str, embedder: Optional[Embedder] = None, *, flo
             if top:
                 store.log_outcome(top[0].id, "omitted", source="surface", turn_ref=log_turn, detail=json.dumps({"why": item.why}))
     if not shown and not agent_ids:
-        return Surfaced("", [])
+        return Surfaced("", [], named)
     if omitted:
         lines.append(f"{len(omitted)} omitted: {', '.join(omitted[:4])}")
-    return Surfaced("\n".join(lines), shown)
+    return Surfaced("\n".join(lines), shown, named)

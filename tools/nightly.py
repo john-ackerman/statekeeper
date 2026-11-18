@@ -86,6 +86,12 @@ def main() -> int:
         path.write_text(json.dumps(out, indent=1), encoding="utf-8")
         return {"path": str(path), "outcomes_by_kind": out["outcomes_by_kind"], "live_turns_recorded": out["live_turns_recorded"], "misses_by_source": out["misses_by_source"]}
 
+    def weights():
+        """Per-state usefulness weights from the last 21 days of outcomes (statekeeper.usefulness.weigh): logged, reasoned, revertible; flags, never closes."""
+        from statekeeper.usefulness import weigh
+        out = weigh(SqliteStore(db), days=21, actor="nightly:usefulness")
+        return {"changed": len(out["changed"]), "flagged": out["flagged"], "sample": out["changed"][:5]}
+
     def health():
         """The last 24 hours of the live hooks, as reports/health-<date>.txt and reports/health-latest.txt (the file to glance at each day)."""
         from statekeeper.report import health_text, injection_health
@@ -95,6 +101,9 @@ def main() -> int:
         except OSError:
             lines = []
         h = injection_health(lines, since)
+        from statekeeper.usefulness import summary
+        h["usefulness"] = summary(SqliteStore(db), days=1)
+        h["open_flags"] = len(SqliteStore(db).open_flags())
         d = home / "reports"
         d.mkdir(parents=True, exist_ok=True)
         text = health_text(h)
@@ -114,6 +123,7 @@ def main() -> int:
         step(log, "consolidate", consolidate)
         step(log, "misses", misses)
     step(log, "report", report)
+    step(log, "usefulness-weights", weights)
     step(log, "injection-health", health)
     home.mkdir(parents=True, exist_ok=True)
     with open(home / "nightly.log.jsonl", "a", encoding="utf-8") as f:

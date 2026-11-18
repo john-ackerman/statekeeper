@@ -94,7 +94,8 @@ class Event:
     recorded_utc: str
 
 
-OUTCOME_KINDS = ("surfaced", "omitted", "used", "contradicted", "verified_right", "verified_wrong", "missed")
+OUTCOME_KINDS = ("surfaced", "omitted", "used", "unhelpful", "contradicted", "verified_right", "verified_wrong", "missed")
+WEIGHT_PREFIX = "weight.state."   # per-state usefulness weights live in param_history (logged, reasoned, revertible), not on the state
 
 
 @dataclass(frozen=True)
@@ -141,6 +142,7 @@ class Store(Protocol):
     def outcomes(self, *, kind: str | None = None, state_id: int | None = None, turn_ref: str | None = None) -> list["Outcome"]: ...
     def set_param(self, name: str, value: float, reason: str, *, actor: str) -> None: ...
     def get_param(self, name: str, default: float) -> float: ...
+    def state_weights(self) -> dict[int, float]: ...
     def revert_param(self, name: str, *, actor: str) -> float: ...
     def param_history(self, name: str) -> list[tuple[int, float, str, str]]: ...
     def add_evidence(self, state_id: int, evidence: Evidence, *, actor: str) -> None: ...
@@ -234,7 +236,17 @@ class SqliteStore:
         if old and "'legacy'" not in old[0]:
             self.db.execute("DROP INDEX IF EXISTS idx_shadow_inj_turn")
             self.db.execute("ALTER TABLE shadow_injections RENAME TO shadow_injections_old")
+        # the same for the outcomes CHECK when a new kind ("unhelpful": someone said a shown state was noise) was added
+        old_out = self.db.execute("SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'outcomes'").fetchone()
+        if old_out and "'unhelpful'" not in old_out[0]:
+            self.db.execute("DROP INDEX IF EXISTS idx_outcomes_state")
+            self.db.execute("DROP INDEX IF EXISTS idx_outcomes_turn")
+            self.db.execute("ALTER TABLE outcomes RENAME TO outcomes_old")
         self.db.executescript(SCHEMA.read_text(encoding="utf-8"))
+        if self.db.execute("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'outcomes_old'").fetchone():
+            self.db.execute("INSERT OR IGNORE INTO outcomes (id, state_id, thing_id, kind, source, turn_ref, detail, params, recorded_utc) "
+                            "SELECT id, state_id, thing_id, kind, source, turn_ref, detail, params, recorded_utc FROM outcomes_old")
+            self.db.execute("DROP TABLE IF EXISTS outcomes_old")
         if self.db.execute("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'shadow_injections_old'").fetchone():
             self.db.execute("INSERT OR IGNORE INTO shadow_injections (id, turn_ref, source, hook_event, kind, text, created_utc) "
                             "SELECT id, turn_ref, CASE source WHEN 'statekeeper' THEN 'statekeeper' ELSE 'legacy' END, hook_event, kind, text, created_utc FROM shadow_injections_old")
@@ -486,7 +498,8 @@ class SqliteStore:
 
     # ---- outcomes and parameters (learning from reality; see docs/A section 15) ----
     def _params_in_force(self) -> str:
-        rows = self.db.execute("SELECT name, value FROM param_history WHERE id IN (SELECT MAX(id) FROM param_history GROUP BY name) ORDER BY name")
+        rows = self.db.execute("SELECT name, value FROM param_history WHERE id IN (SELECT MAX(id) FROM param_history GROUP BY name) "
+                               "AND name NOT LIKE 'weight.state.%' ORDER BY name")
         return ",".join(f"{n}={v:g}" for n, v in rows)
 
     def log_outcome(self, state_id, kind, *, source, thing_id=None, turn_ref=None, detail=None) -> int:
@@ -515,6 +528,11 @@ class SqliteStore:
     def get_param(self, name, default) -> float:
         row = self.db.execute("SELECT value FROM param_history WHERE name = ? ORDER BY id DESC LIMIT 1", (name,)).fetchone()
         return row[0] if row else default
+
+    def state_weights(self) -> dict[int, float]:
+        """Every per-state usefulness weight in force (1.0 when none was ever set)."""
+        rows = self.db.execute("SELECT name, value FROM param_history WHERE id IN (SELECT MAX(id) FROM param_history WHERE name LIKE 'weight.state.%' GROUP BY name)")
+        return {int(n[len(WEIGHT_PREFIX):]): v for n, v in rows if n[len(WEIGHT_PREFIX):].isdigit()}
 
     def revert_param(self, name, *, actor) -> float:
         row = self.db.execute("SELECT previous FROM param_history WHERE name = ? ORDER BY id DESC LIMIT 1", (name,)).fetchone()

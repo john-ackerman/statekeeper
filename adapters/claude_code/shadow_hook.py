@@ -38,8 +38,9 @@ def log(event: dict) -> None:
         f.write(json.dumps(event) + "\n")
 
 
-def last_answer(transcript_path: str, limit: int = 400_000) -> str:
-    """The assistant text blocks written since the last real user message in the transcript."""
+def last_answer(transcript_path: str, limit: int = 400_000, *, with_tools: bool = False) -> str:
+    """The assistant text blocks written since the last real user message in the transcript; with_tools adds each tool call's input (commands,
+    paths, PR numbers), since acting on a state counts as using it as much as quoting it does."""
     text, parts = "", []
     with open(transcript_path, "rb") as f:
         f.seek(0, os.SEEK_END)
@@ -58,7 +59,11 @@ def last_answer(transcript_path: str, limit: int = 400_000) -> str:
             if not any(isinstance(b, dict) and b.get("type") == "tool_result" for b in blocks):
                 parts = []
         else:
-            parts += [b.get("text", "") for b in (content if isinstance(content, list) else []) if isinstance(b, dict) and b.get("type") == "text"]
+            for b in (content if isinstance(content, list) else []):
+                if isinstance(b, dict) and b.get("type") == "text":
+                    parts.append(b.get("text", ""))
+                elif with_tools and isinstance(b, dict) and b.get("type") == "tool_use":
+                    parts.append(json.dumps(b.get("input") or {}, ensure_ascii=False)[:2000])
     return "\n".join(p for p in parts if p.strip())
 
 
@@ -173,23 +178,46 @@ def prompt_context(event: dict, store, embedder, state: dict, state_file: Path, 
     recent = [r for r in (state.get(f"recent:{session}") or []) if isinstance(r, dict) and now_s - r.get("at", 0) <= RECENT_SECONDS][-RECENT_TURNS:]
     skip = set(i for r in recent for i in r.get("states", []))
     # a thing shown lately stays out until one of its states changes: its OTHER states are not a reason to show it again
+    news = set()
     for r in recent:
         shown_at = time.strftime("%Y-%m-%d %H:%M:%S", time.gmtime(r.get("at", 0)))
         for tid in r.get("things", []):
-            skip |= {s.id for s in store.states_of(tid) if (s.recorded_utc or "")[:19] <= shown_at}
+            for s in store.states_of(tid):
+                (skip if (s.recorded_utc or "")[:19] <= shown_at else news).add(s.id)
+    news -= skip
+    from statekeeper import usefulness
+    turn_no = int(state.get(f"turns:{session}") or 0) + (0 if automated else 1)
+    stored_topic = state.get(f"topic:{session}") or {}
+    topic = usefulness.topic_scores(stored_topic, now_s, turn_no)
+    feedback = corrections = 0
     if automated:
         from statekeeper.retrieve import Surfaced
         out = Surfaced("", [])           # a task notification or an agent's hand-back is not a question from the person: inject nothing
     else:
+        # what the person says about what was shown: explicit "sk #123 wrong", or a correction that points at a state shown on the last turn
+        feedback = usefulness.log_feedback(store, usefulness.parse_feedback(prompt), source="feedback:prompt", turn_ref=turn_ref, note=prompt)
+        last = recent[-1]["states"] if recent else []
+        for sid in usefulness.corrected(store, prompt, last):
+            store.log_outcome(sid, "contradicted", source="user-correction", turn_ref=turn_ref, detail=json.dumps({"prompt": prompt[:200]}))
+            corrections += 1
+        # a thing on topic keeps only its exact shown states out (its other relevant states may come up); others stay out as a whole
+        on_topic_skip = set(i for r in recent for i in r.get("states", []))
+        skip = {i for i in skip if i in on_topic_skip or (store.get_state(i) and store.get_state(i).thing_id not in {t for t, v in topic.items() if v >= 0.6})}
         out = surface(store, prompt, embedder, log_turn=turn_ref, floor=LIVE_FLOOR, max_things=LIVE_MAX_THINGS, budget=LIVE_BUDGET, exclude_kinds=("agent", "person"),
-                      exclude_names=("working note",), skip_state_ids=frozenset(skip), max_states=LIVE_MAX_STATES)
+                      exclude_names=("working note",), skip_state_ids=frozenset(skip), max_states=LIVE_MAX_STATES, topic=topic, news=frozenset(news))
     block = (MARK + out.block) if out.block else ""
     store.record_turn_text(turn_ref, "prompt", prompt[:20000], session_id=session)
     store.record_injection(turn_ref, "statekeeper", "UserPromptSubmit", "concept_map", block)
     shown = {"at": now_s, "states": [s.id for i in out.items for s in i.states], "things": [i.thing.id for i in out.items]}
-    update_state(state_file, lambda st: st.update({session: turn_ref, f"recent:{session}": (recent + ([shown] if shown["states"] else []))[-RECENT_TURNS:]}))
+    changes = {session: turn_ref, f"recent:{session}": (recent + ([shown] if shown["states"] else []))[-RECENT_TURNS:]}
+    if not automated:
+        on = {t for t, v in topic.items() if v >= 0.6}
+        changes[f"topic:{session}"] = usefulness.topic_update(stored_topic, now_s, turn_no, out.named, shown["things"], on)
+        changes[f"turns:{session}"] = turn_no
+    update_state(state_file, lambda st: st.update(changes))
     rec = {"event": "UserPromptSubmit", "session": session, "turn": turn_ref, "things": [i.thing.name for i in out.items], "block_chars": len(block), "ms": int((time.time() - t0) * 1000),
-           "prompt_sha": hashlib.sha256(prompt.encode("utf-8")).hexdigest()[:12], "live": inject_on(), "automated": automated}
+           "prompt_sha": hashlib.sha256(prompt.encode("utf-8")).hexdigest()[:12], "live": inject_on(), "automated": automated,
+           "on_topic": sorted(t for t, v in topic.items() if v >= 0.6)[:8], "feedback": feedback, "corrections": corrections}
     rec["observe_started"] = maybe_observe(state_dir) if os.environ.get("STATEKEEPER_NO_OBSERVE_IN_TESTS") != "1" else False
     log(rec)
     return rec, block
@@ -212,14 +240,16 @@ def handle(event: dict, store, embedder, state_dir: Path) -> dict:
         from statekeeper.commitments import find_commitments
         from statekeeper.outcomes import label_turn
         turn_ref = state.get(session)
+        acted = ""
         try:
             answer = last_answer(event["transcript_path"]) if event.get("transcript_path") else ""
+            acted = last_answer(event["transcript_path"], with_tools=True) if event.get("transcript_path") else ""
         except OSError:
             answer = ""
         answer = answer or str(event.get("last_assistant_message") or "")
         if not turn_ref or not answer:
             return {}
-        counts = label_turn(store, turn_ref, answer, source="shadow-stop")
+        counts = label_turn(store, turn_ref, acted or answer, source="shadow-stop")
         store.record_turn_text(turn_ref, "output", answer[:40000], session_id=session)
         if event.get("transcript_path"):
             try:

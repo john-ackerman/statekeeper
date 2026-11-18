@@ -5,7 +5,7 @@
     python tools/curate.py [--db PATH] close <id> --reason "..." [--replaced-by N]
     python tools/curate.py [--db PATH] reopen <id> --reason "..."
     python tools/curate.py [--db PATH] add <thing> "<text>" --evidence-type T --evidence-ref R [--excerpt E] [--trust owner|verified|derived]
-                                       [--kind belief|rule] [--volatility work|stable|rule] [--thing-kind thing|person|agent] [--replaces N]
+                                       [--kind belief|rule] [--volatility work|stable|rule] [--thing-kind thing|person|agent] [--replaces N] [--object THING]
 
 Every write goes through the Store API (so it is in the event log with the actor) and needs a reason or evidence. Back the database up first
 (tools/backup_db.py). `--replaces N` adds the new state and closes #N with it as the replacement.
@@ -53,6 +53,7 @@ def main() -> int:
     a.add_argument("--volatility", default="work", choices=("work", "stable", "rule"))
     a.add_argument("--thing-kind", default="thing", choices=("thing", "person", "agent"))
     a.add_argument("--replaces", type=int, default=None)
+    a.add_argument("--object", default=None, help="the thing the state is about besides its subject (it must exist)")
     args = ap.parse_args()
     store = SqliteStore(args.db)
     try:
@@ -80,7 +81,7 @@ def main() -> int:
                 store.add_thing(args.thing, args.thing_kind, actor=args.actor)
             learned = {"owner": "told", "verified": "read", "derived": "inferred"}[args.trust]
             s = store.add_state(args.thing, args.text, evidence=[Evidence(args.evidence_type, args.evidence_ref, args.excerpt)], writer=args.actor,
-                                trust=args.trust, learned_how=learned, kind=args.kind, volatility=args.volatility)
+                                trust=args.trust, learned_how=learned, kind=args.kind, volatility=args.volatility, object=args.object)
             print(line(s))
             if args.replaces:
                 store.close_state(args.replaces, f"replaced by #{s.id}", replaced_by=s.id, actor=args.actor)

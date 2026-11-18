@@ -24,6 +24,12 @@ HOME = Path(os.environ.get("STATEKEEPER_HOME") or Path.home() / ".claude" / "sta
 OFF = ("0", "off", "false", "no")
 
 
+def read_event() -> dict:
+    """The hook's JSON from stdin as UTF-8 bytes, whatever the console code page: a prompt with a curly quote or an emoji must not fail the hook
+    (decoded through the locale it came back as lone surrogates that SQLite refuses)."""
+    return json.loads(sys.stdin.buffer.read().decode("utf-8", "replace") or "{}")
+
+
 def log(event: dict) -> None:
     event["at"] = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
     HOME.mkdir(parents=True, exist_ok=True)
@@ -218,7 +224,7 @@ def main() -> int:
     if os.environ.get("STATEKEEPER_SHADOW", "1").strip().lower() in OFF:
         return 0
     try:
-        event = json.load(sys.stdin)
+        event = read_event()
         from statekeeper import SqliteStore
         from statekeeper.embed import HttpEmbedder
         HOME.mkdir(parents=True, exist_ok=True)

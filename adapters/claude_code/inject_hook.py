@@ -48,7 +48,7 @@ def main() -> int:
     if os.environ.get("STATEKEEPER_SHADOW", "1").strip().lower() in shadow_hook.OFF or not shadow_hook.inject_on():
         return 0
     try:
-        event = json.load(sys.stdin)
+        event = shadow_hook.read_event()
         name = event.get("hook_event_name")
         if name not in (None, "UserPromptSubmit", "SessionStart"):
             return 0

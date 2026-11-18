@@ -400,7 +400,8 @@ def surface(store: Store, text: str, embedder: Optional[Embedder] = None, *, flo
             for s in item.states:
                 store.log_outcome(s.id, "surfaced", source="surface", turn_ref=log_turn, detail=json.dumps({"why": item.why, "status": s.status, "trust": s.trust}))
         for sid in agent_ids:
-            store.log_outcome(sid, "surfaced", source="surface", turn_ref=log_turn, detail=json.dumps({"why": "agents line"}))
+            st = store.get_state(sid)
+            store.log_outcome(sid, "surfaced", source="surface", turn_ref=log_turn, detail=json.dumps({"why": "agents line", "status": st.status if st else None, "trust": st.trust if st else None}))
         for item in dropped:
             top = item.states[:1] or sorted(store.states_of(item.thing.id), key=lambda s: s.recency, reverse=True)[:1]
             if top:

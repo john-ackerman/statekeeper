@@ -4,7 +4,11 @@ never emitted) until it is enabled.
 """
 from __future__ import annotations
 
+from datetime import datetime, timezone
+
 from .store import Store
+
+STALE_HOURS = 6
 
 NOTE_THING = "working note"
 
@@ -26,13 +30,22 @@ def session_block(store: Store, *, budget: int = 9000) -> str:
         if cur:
             lines += ["", f"Working note (last changed {cur[0].recorded_utc[:16]}, verified {(cur[0].confirmed_utc or '')[:16]}):", cur[0].text]
     tracked: list[str] = []
+    now = datetime.now(timezone.utc)
+
+    def age(s) -> str:
+        """A tracked value not re-read for hours says so, rather than reading as current."""
+        try:
+            h = (now - datetime.fromisoformat((s.confirmed_utc or s.recorded_utc)[:19]).replace(tzinfo=timezone.utc)).total_seconds() / 3600
+        except ValueError:
+            return " (STALE)"
+        return f" (STALE, last verified {int(h)}h ago)" if h > STALE_HOURS else ""
     for t in store.things():
         if t.retired:
             continue
         cur = {s.state_key: s for s in store.states_of(t.id) if s.state_key and s.status == "active"}
         if "pr.state" in cur and cur["pr.state"].text.startswith(("draft", "open")):
-            tracked.append(f"- {t.name}: {cur['pr.state'].text}; {cur.get('pr.ci').text if cur.get('pr.ci') else ''}; {cur.get('pr.review').text if cur.get('pr.review') else ''}")
-        elif "agent.status" in cur and cur["agent.status"].text.startswith("working"):
+            tracked.append(f"- {t.name}: {cur['pr.state'].text}; {cur.get('pr.ci').text if cur.get('pr.ci') else ''}; {cur.get('pr.review').text if cur.get('pr.review') else ''}{age(cur['pr.state'])}")
+        elif "agent.status" in cur and cur["agent.status"].text.startswith("working") and not age(cur["agent.status"]):
             tracked.append(f"- {t.name}: {cur['agent.status'].text}")
     if tracked:
         lines += ["", "Tracked now (from outside reads; each has a last-verified time in the store):", *tracked[:40]]

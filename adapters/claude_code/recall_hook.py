@@ -34,7 +34,7 @@ def main() -> int:
     if os.environ.get("STATEKEEPER_RECALL") == "0":
         return 0
     try:
-        event = json.load(sys.stdin)
+        event = json.loads(sys.stdin.buffer.read().decode("utf-8", "replace") or "{}")
         store = SqliteStore(os.environ.get("STATEKEEPER_DB") or "out/statekeeper.db")
         embedder = HttpEmbedder() if os.environ.get("STATEKEEPER_EMBED_URL") else None
         text = run(event, store, embedder)

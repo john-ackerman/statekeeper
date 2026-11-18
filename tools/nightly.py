@@ -1,5 +1,5 @@
-"""The nightly job for the shadow store: verified backup, an incremental re-import from an earlier fact store (only if configured), a consolidation pass, miss detection, and an
-outcome report. Each step is independent and logged; a failing step does not stop the next. Not wired to any scheduler by this file.
+"""The nightly job for the statekeeper store: verified backup, an incremental re-import from an earlier fact store (only if configured), a consolidation pass, miss detection, an
+outcome report, and a one-screen health summary of the live hooks (reports/health-latest.txt). Each step is independent and logged; a failing step does not stop the next. Not wired to any scheduler by this file.
 
     python tools/nightly.py [--home ~/.claude/statekeeper] [--skip-import] [--skip-embed]
 
@@ -86,6 +86,22 @@ def main() -> int:
         path.write_text(json.dumps(out, indent=1), encoding="utf-8")
         return {"path": str(path), "outcomes_by_kind": out["outcomes_by_kind"], "live_turns_recorded": out["live_turns_recorded"], "misses_by_source": out["misses_by_source"]}
 
+    def health():
+        """The last 24 hours of the live hooks, as reports/health-<date>.txt and reports/health-latest.txt (the file to glance at each day)."""
+        from statekeeper.report import health_text, injection_health
+        since = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(time.time() - 86400))
+        try:
+            lines = (home / "shadow.log.jsonl").read_text(encoding="utf-8").splitlines()[-20000:]
+        except OSError:
+            lines = []
+        h = injection_health(lines, since)
+        d = home / "reports"
+        d.mkdir(parents=True, exist_ok=True)
+        text = health_text(h)
+        (d / f"health-{time.strftime('%Y%m%d')}.txt").write_text(text, encoding="utf-8")
+        (d / "health-latest.txt").write_text(text, encoding="utf-8")
+        return h
+
     def observe():
         out = run([sys.executable, str(ROOT / "tools" / "observe_all.py"), "--db", str(db)], capture_output=True, text=True, encoding="utf-8", timeout=900)
         return json.loads(out.stdout.strip().splitlines()[-1]) if out.stdout.strip() else {"error": out.stderr[-200:]}
@@ -98,6 +114,7 @@ def main() -> int:
         step(log, "consolidate", consolidate)
         step(log, "misses", misses)
     step(log, "report", report)
+    step(log, "injection-health", health)
     home.mkdir(parents=True, exist_ok=True)
     with open(home / "nightly.log.jsonl", "a", encoding="utf-8") as f:
         f.write(json.dumps({"at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()), "steps": log}) + "\n")

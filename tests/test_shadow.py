@@ -22,6 +22,14 @@ def seeded():
 
 
 class Handling(unittest.TestCase):
+    """Shadow mode: the live flag must be off here even on a machine where it is on."""
+    def setUp(self):
+        self._inject = os.environ.pop("STATEKEEPER_INJECT", None)
+
+    def tearDown(self):
+        if self._inject is not None:
+            os.environ["STATEKEEPER_INJECT"] = self._inject
+
     def test_a_prompt_logs_surfaced_outcomes_and_the_stop_labels_used_from_the_answer(self):
         with tempfile.TemporaryDirectory() as d:
             shadow_hook.HOME = Path(d)
@@ -132,6 +140,30 @@ class Inject(unittest.TestCase):
             off = subprocess.run([sys.executable, str(ROOT / "adapters" / "claude_code" / "inject_hook.py")],
                                  input=json.dumps({"hook_event_name": "SessionStart", "session_id": "s1"}), capture_output=True, text=True, env=env)
             self.assertEqual((0, ""), (off.returncode, off.stdout))
+
+    def test_the_session_block_marks_a_tracked_pr_not_re_read_for_hours_as_stale(self):
+        from statekeeper.session import session_block
+        s = SqliteStore(":memory:")
+        s.add_state("ExampleApp PR 9", "open", evidence=[ev()], writer="rule:github-pr", trust="verified", learned_how="read", state_key="pr.state", volatility="live")
+        self.assertNotIn("STALE", session_block(s))
+        s.db.execute("UPDATE states SET confirmed_utc = '2026-01-01 00:00:00', recorded_utc = '2026-01-01 00:00:00'")
+        self.assertIn("ExampleApp PR 9: open", session_block(s))
+        self.assertIn("STALE, last verified", session_block(s))
+
+    def test_a_prompt_with_non_ascii_text_is_read_as_utf8_whatever_the_console_code_page(self):
+        with tempfile.TemporaryDirectory() as d:
+            db = os.path.join(d, "s.db")
+            st = SqliteStore(db)
+            st.add_state("the converter", "caps replicas at 75", evidence=[ev()], writer="rule:t", trust="verified", learned_how="read")
+            st.close()
+            env = dict(os.environ, STATEKEEPER_HOME=d, STATEKEEPER_DB=db, STATEKEEPER_INJECT="1", STATEKEEPER_NO_OBSERVE_IN_TESTS="1")
+            env.pop("PYTHONUTF8", None)
+            env.pop("STATEKEEPER_EMBED_URL", None)
+            body = json.dumps({"hook_event_name": "UserPromptSubmit", "session_id": "u1", "prompt": "why doesn’t the converter cap replicas? 🤔"},
+                              ensure_ascii=False).encode("utf-8")
+            r = subprocess.run([sys.executable, str(ROOT / "adapters" / "claude_code" / "inject_hook.py")], input=body, capture_output=True, env=env)
+            self.assertIn("caps replicas at 75", json.loads(r.stdout)["hookSpecificOutput"]["additionalContext"])
+            self.assertNotIn("error", Path(d, "shadow.log.jsonl").read_text(encoding="utf-8"))
 
     def test_a_broken_event_never_fails_the_turn_or_prints(self):
         with tempfile.TemporaryDirectory() as d:

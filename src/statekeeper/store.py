@@ -200,6 +200,11 @@ _STATE_COLUMNS = ("s.id, s.thing_id, t.name, s.object_id, o.name, s.text, s.kind
 _STATE_FROM = "FROM states s JOIN things t ON t.id = s.thing_id LEFT JOIN things o ON o.id = s.object_id"
 
 
+def _utf8(text: str) -> str:
+    """Text SQLite can store: a lone surrogate (a JSON escape such as backslash-udc8f in a hook's input, or bytes decoded through the wrong code page) becomes "?"."""
+    return text.encode("utf-8", "replace").decode("utf-8") if text else text
+
+
 def _state(row) -> State:
     r = list(row)
     r[8] = bool(r[8])
@@ -524,7 +529,7 @@ class SqliteStore:
     def record_injection(self, turn_ref, source, hook_event, kind, text) -> None:
         if source not in ("legacy", "statekeeper"):
             raise StoreError("source must be legacy or statekeeper")
-        self.db.execute("INSERT INTO shadow_injections (turn_ref, source, hook_event, kind, text, created_utc) VALUES (?,?,?,?,?,?)", (turn_ref, source, hook_event, kind, text, now()))
+        self.db.execute("INSERT INTO shadow_injections (turn_ref, source, hook_event, kind, text, created_utc) VALUES (?,?,?,?,?,?)", (turn_ref, source, hook_event, kind, _utf8(text), now()))
 
     def injections(self, *, turn_ref=None, source=None) -> list[tuple[str, str, str, str, str, str]]:
         """(turn_ref, source, hook_event, kind, text, created_utc), oldest first."""
@@ -568,6 +573,7 @@ class SqliteStore:
         return self.get_state(state_id)  # type: ignore[return-value]
 
     def record_turn_text(self, turn_ref, kind, text, *, session_id=None) -> None:
+        text = _utf8(text)
         self.db.execute("INSERT OR REPLACE INTO turn_texts (turn_ref, kind, session_id, created_utc, text) VALUES (?,?,?,?,?)", (turn_ref, kind, session_id, now(), text))
 
     def turn_texts(self, kind, *, after=None) -> list[tuple[str, str | None, str, str]]:

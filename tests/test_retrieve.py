@@ -151,7 +151,9 @@ class Relevance(unittest.TestCase):
         self.assertEqual("", surface(self.s, "since you are running a local agent anyway", None, today=now).block)
         rule = self.s.add_state("shepherd agents", "are not resumable after a restart: dispatch a fresh one", evidence=[ev("r")], writer="w", trust="verified",
                                 learned_how="read", kind="rule", volatility="rule")
-        self.assertIn(f"#{rule.id} are not resumable", surface(self.s, "are the agents running fine?", None, today=now).block)
+        self.assertIn(f"#{rule.id} are not resumable", surface(self.s, "are the agents running fine?", None, today=now, log_turn="t-agents").block)
+        from statekeeper.report import build_report
+        self.assertGreater(build_report(self.s)["outcomes_by_kind"]["surfaced"], 0)      # the outcome report reads what the agents line logged
 
     def test_a_pasted_pr_link_names_the_pr(self):
         self.s.add_state("ExampleApp PR 7", "open", evidence=[ev("p")], writer="rule:github-pr", trust="verified", learned_how="read", state_key="pr.state", volatility="live")

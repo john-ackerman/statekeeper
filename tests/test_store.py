@@ -150,6 +150,14 @@ class Closing(unittest.TestCase):
         self.assertTrue(back.standing)
 
 
+class TurnText(unittest.TestCase):
+    def test_a_lone_surrogate_in_turn_text_is_stored_as_a_replacement_character_not_an_error(self):
+        s = fresh_store()
+        s.record_turn_text("t1", "prompt", json.loads(r'"bad \udc8f byte"'))
+        s.record_injection("t1", "legacy", "UserPromptSubmit", "concept_map", json.loads(r'"x \udc9d"'))
+        self.assertEqual("bad ? byte", s.turn_texts("prompt")[0][3])
+
+
 class Hints(unittest.TestCase):
     def test_a_newer_state_that_reads_as_an_update_is_hinted_and_unrelated_or_same_source_ones_are_not(self):
         s = fresh_store()

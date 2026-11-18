@@ -237,7 +237,7 @@ def handle(event: dict, store, embedder, state_dir: Path) -> dict:
         if inject_on():
             return {}                      # the live inject hook handles this prompt (and logs it the same way); doing it twice would double-count
         return prompt_context(event, store, embedder, state, state_file, state_dir)[0]
-    if name == "Stop":
+    if name in ("Stop", "SessionEnd"):
         from statekeeper.commitments import find_commitments
         from statekeeper.outcomes import label_turn
         turn_ref = state.get(session)
@@ -250,6 +250,14 @@ def handle(event: dict, store, embedder, state_dir: Path) -> dict:
         answer = answer or str(event.get("last_assistant_message") or "")
         if not turn_ref or not answer:
             return {}
+        if name == "SessionEnd":
+            # the session is over: keep its last answer if the async Stop did not get to it (a `claude -p` run can exit first); never label twice
+            if store.db.execute("SELECT 1 FROM turn_texts WHERE turn_ref = ? AND kind = 'output'", (turn_ref,)).fetchone():
+                return {}
+            store.record_turn_text(turn_ref, "output", answer[:40000], session_id=session)
+            rec = {"event": name, "session": session, "turn": turn_ref, "answer_chars": len(answer)}
+            log(rec)
+            return rec
         counts = label_turn(store, turn_ref, acted or answer, source="shadow-stop")
         store.record_turn_text(turn_ref, "output", answer[:40000], session_id=session)
         if event.get("transcript_path"):

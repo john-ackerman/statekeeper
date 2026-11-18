@@ -18,15 +18,15 @@ WRITER = "rule:core-notes"
 NOTE = "working note"
 
 
-def _text(f: dict) -> str:
+def _text(f: dict, max_chars: int = 520) -> str:
     body = " ".join((f.get("content") or "").split())
     title = " ".join((f.get("summary") or "").split()) or body[:80]
-    return f"{title}: {body}"[:520] if title and title != body[:80] else body[:520]
+    return f"{title}: {body}"[:max_chars] if title and title != body[:80] else body[:max_chars]
 
 
 def observe_core(store: Store, fragments: list[dict], note: str | None, *, agent: str = "agent", person: str = "person",
                  writer: str = WRITER, source: str = "legacy", handle_prefix: str = "legacy-store",
-                 clock: Callable[[], str] = now) -> dict:
+                 clock: Callable[[], str] = now, max_chars: int = 520) -> dict:
     """`fragments` are dicts with `id`, `type` ("Identity" or "Relational"), `content`, optional `summary` and `created`."""
     out = {"core": 0, "changed": 0, "note": False}
     for thing, kind_type in ((agent, "Identity"), (person, "Relational")):
@@ -35,7 +35,7 @@ def observe_core(store: Store, fragments: list[dict], note: str | None, *, agent
             continue
         if not store.find(thing):
             store.add_thing(thing, "agent" if thing == agent else "person", actor=writer)
-        obs = {f"core.{f['id']}": _text(f) for f in mine}
+        obs = {f"core.{f['id']}": _text(f, max_chars) for f in mine}
         r = observe_keyed(store, writer=writer, thing=thing, parent=None, observations=obs,
                           evidence=Evidence("tool", f"{source} core {kind_type}", f"{len(mine)} fragments"), handle=f"{handle_prefix} list --type {kind_type}",
                           as_of=mine[0].get("created"), clock=clock, volatility="rule")

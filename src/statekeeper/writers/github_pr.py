@@ -14,13 +14,15 @@ from ..store import Evidence, Store, now
 from .common import observe_keyed
 
 WRITER = "rule:github-pr"
+WIP_CHECKS = frozenset({"WIP"})
 FIELDS = "state,isDraft,reviewDecision,statusCheckRollup,headRefOid,updatedAt"
 
 
 def normalize(p: dict) -> dict[str, str]:
     state = str(p.get("state") or "").lower()
     pr_state = "draft, open" if state == "open" and p.get("isDraft") else state
-    checks = [c for c in (p.get("statusCheckRollup") or []) if isinstance(c, dict)]
+    # a "WIP" check (the work-in-progress app) stays in progress for as long as the PR is a draft: it reports the draft, not CI
+    checks = [c for c in (p.get("statusCheckRollup") or []) if isinstance(c, dict) and not (p.get("isDraft") and (c.get("name") or c.get("context")) in WIP_CHECKS)]
     sha = str(p.get("headRefOid") or "")[:7]
     failed = [c.get("name") or c.get("context") or "?" for c in checks if str(c.get("conclusion") or c.get("state") or "").upper() in ("FAILURE", "ERROR", "TIMED_OUT", "CANCELLED", "ACTION_REQUIRED")]
     running = [c for c in checks if str(c.get("status") or "").upper() in ("IN_PROGRESS", "QUEUED", "PENDING", "WAITING") or str(c.get("state") or "").upper() == "PENDING"]

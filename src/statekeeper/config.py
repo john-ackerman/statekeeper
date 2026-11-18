@@ -8,6 +8,8 @@ Search order, first file found wins: the path in STATEKEEPER_CONFIG, `local/conf
     ado_org, ado_project   Azure DevOps organization URL and project for the build writer (environment variables STATEKEEPER_ADO_ORG / _PROJECT win)
     legacy_export_command  ["python", "script.py"]  a command that prints, to stdout, an export of an earlier fact store as JSON (see tools/import_legacy.py);
                            the nightly job re-imports it incrementally when present
+    session_refresh_command ["python", "script.py"]  run (bounded, 20 s) by the live SessionStart hook before it prints the session block, e.g. to
+                           re-read the core and the working note from wherever they are kept
 """
 from __future__ import annotations
 

@@ -28,9 +28,12 @@ def group() -> dict:
 INJECT = HOOK.with_name("inject_hook.py")
 
 
-def inject_group() -> dict:
+INJECT_EVENTS = {"UserPromptSubmit": 6, "SessionStart": 30}   # event -> timeout (s); SessionStart may run the configured refresh first
+
+
+def inject_group(event: str = "UserPromptSubmit") -> dict:
     """The synchronous live-injection hook: it exits silently unless STATEKEEPER_INJECT=1, so registering it changes nothing until the flag is flipped."""
-    return {"hooks": [{"type": "command", "command": f'& python "{INJECT}"', "shell": "powershell", "timeout": 6}]}
+    return {"hooks": [{"type": "command", "command": f'& python "{INJECT}"', "shell": "powershell", "timeout": INJECT_EVENTS[event]}]}
 
 
 def is_ours(g: dict) -> bool:
@@ -46,7 +49,7 @@ def main() -> int:
     ap.add_argument("--settings", default=str(Path.home() / ".claude" / "settings.json"))
     ap.add_argument("--remove", action="store_true")
     ap.add_argument("--dry-run", action="store_true")
-    ap.add_argument("--inject", action="store_true", help="also register the synchronous live-injection hook (inert until STATEKEEPER_INJECT=1)")
+    ap.add_argument("--inject", action="store_true", help="also register the synchronous live-injection hooks, UserPromptSubmit and SessionStart (inert until STATEKEEPER_INJECT=1)")
     args = ap.parse_args()
     path = Path(args.settings)
     raw = path.read_text(encoding="utf-8")
@@ -59,8 +62,8 @@ def main() -> int:
         groups[:] = [g for g in groups if not is_ours(g)]
         if not args.remove:
             groups.append(group())
-            if ev == "UserPromptSubmit" and want_inject:
-                groups.append(inject_group())
+            if ev in INJECT_EVENTS and want_inject:
+                groups.append(inject_group(ev))
         if not groups:
             del hooks[ev]
     # prove the merge: every pre-existing group is still present, unchanged, in the same order

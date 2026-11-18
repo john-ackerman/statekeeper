@@ -101,6 +101,38 @@ class Inject(unittest.TestCase):
             quiet = self.run_inject("lunch on friday?", db, d, "1")
             self.assertEqual((0, ""), (quiet.returncode, quiet.stdout))
 
+    def test_session_start_runs_the_configured_refresh_then_prints_the_session_block(self):
+        with tempfile.TemporaryDirectory() as d:
+            db = os.path.join(d, "s.db")
+            marker = os.path.join(d, "refreshed.txt")
+            refresher = os.path.join(d, "refresh.py")
+            Path(refresher).write_text("\n".join([
+                "import sys",
+                f"sys.path.insert(0, {str(ROOT / 'src')!r})",
+                "from statekeeper import SqliteStore, Evidence",
+                f"s = SqliteStore({db!r})",
+                "s.add_state('working note', 'doing the flip', evidence=[Evidence('tool', 'note')], writer='rule:t', trust='verified', learned_how='read', state_key='note')",
+                f"open({marker!r}, 'w').write('ok')",
+            ]) + "\n", encoding="utf-8")
+            cfg = os.path.join(d, "config.json")
+            Path(cfg).write_text(json.dumps({"session_refresh_command": [sys.executable, refresher]}), encoding="utf-8")
+            st = SqliteStore(db)
+            st.add_thing("Claude", "agent")
+            st.add_state("Claude", "works carefully", evidence=[ev()], writer="rule:t", trust="verified", learned_how="read", volatility="rule")
+            st.close()
+            env = dict(os.environ, STATEKEEPER_HOME=d, STATEKEEPER_DB=db, PYTHONUTF8="1", STATEKEEPER_INJECT="1", STATEKEEPER_CONFIG=cfg)
+            r = subprocess.run([sys.executable, str(ROOT / "adapters" / "claude_code" / "inject_hook.py")],
+                               input=json.dumps({"hook_event_name": "SessionStart", "session_id": "s1", "source": "compact"}), capture_output=True, text=True, env=env)
+            self.assertTrue(os.path.exists(marker))                               # the refresh ran first
+            out = json.loads(r.stdout)["hookSpecificOutput"]
+            self.assertEqual("SessionStart", out["hookEventName"])
+            self.assertIn("works carefully", out["additionalContext"])
+            self.assertIn("doing the flip", out["additionalContext"])             # the refreshed working note is in the block
+            env.pop("STATEKEEPER_INJECT")
+            off = subprocess.run([sys.executable, str(ROOT / "adapters" / "claude_code" / "inject_hook.py")],
+                                 input=json.dumps({"hook_event_name": "SessionStart", "session_id": "s1"}), capture_output=True, text=True, env=env)
+            self.assertEqual((0, ""), (off.returncode, off.stdout))
+
     def test_a_broken_event_never_fails_the_turn_or_prints(self):
         with tempfile.TemporaryDirectory() as d:
             env = dict(os.environ, STATEKEEPER_HOME=d, STATEKEEPER_INJECT="1", PYTHONUTF8="1")

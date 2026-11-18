@@ -15,6 +15,11 @@ def payload(**kw):
 
 
 class Normalize(unittest.TestCase):
+    def test_a_drafts_wip_check_is_not_ci(self):
+        wip = [{"name": "build", "status": "COMPLETED", "conclusion": "SUCCESS"}, {"name": "WIP", "status": "IN_PROGRESS", "conclusion": ""}]
+        self.assertTrue(normalize(payload(statusCheckRollup=wip))["pr.ci"].startswith("CI green (1 of 1"))
+        self.assertTrue(normalize(payload(statusCheckRollup=wip, isDraft=False))["pr.ci"].startswith("CI pending"))
+
     def test_a_pr_payload_becomes_three_keyed_observations(self):
         got = normalize(payload())
         self.assertEqual({"pr.state", "pr.ci", "pr.review"}, set(got))

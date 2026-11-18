@@ -76,3 +76,31 @@ A judged comparison on 23 real turns found three defects in the thing-first surf
 - **Negative links** (`unlinks` table; `Store.unlink` / `relink` / `unlinks`; every change an event; nothing deleted). A state can be cut from a thing (`match="any"`: not shown when that thing is named or on topic; `"name"`: only that name/topic connection is cut, meaning may still bring it), from a concept (inputs carrying its words or within 0.80 in meaning of it), or from meaning altogether (`match="meaning"`: only its own name brings it); two things can be cut from each other (neither connects the other's states). The state still surfaces for what it is about. Typed in chat as `sk #<id> not <thing or words>`.
 - **Why it was shown.** `select` records, per state, how it qualified (the name matched or nearly matched and whether the thing counted as specific or generic, the meaning score and shared rare words, topic carry-over, a live keyed value, news since last shown, the usefulness weight). It is logged with each `surfaced` outcome; `tools/explain.py <session|turn> [#id]` prints it as a sentence. The injected line carries a `~0.74` tag only for meaning, word or topic connections.
 - **Relatedness audit** (`usefulness.weak_connections`, nightly health): states shown in 3+ turns of a week through a weak connection (a generic name, rare words, topic carry-over, or meaning within 0.03 of the floor) and never used. A list for a person; nothing is applied.
+
+## 17. "You already have a tool for that": recall by request, states under their topic (2026-11-18)
+
+A regression set of 19 prompts where a tool or how-to state should have been injected though the prompt did not name it (13 real "you should
+already have X" prompts, 6 written to the same pattern) found 4 hits before any change. Causes, measured:
+
+1. **Meaning cannot separate them.** With a small embedding model the right state scored 0.60 to 0.75 against such prompts and so did unrelated ones;
+   the right state was often in the top ten but under the 0.78 live floor, and no absolute or relative (z-score) cut separated right from wrong.
+2. **States filed under the speaker.** 297 of 1,026 standing unkeyed states sat on the person or the agent (all proposed), 151 of them with the tool
+   as their object. Naming the tool never reached them (people are generic and never surfaced by name), and the tool's own thing looked empty.
+3. **Facts never stored.** For 5 of the 13 real prompts no state held the fact at all (a CLI documented only in a skill, CLIs and logins never
+   written down).
+4. **Not causes:** proposed status (proposals are searched and shown like active ones), the token budget, the caps.
+
+Changes:
+
+- **Requests a state answers** (`questions.py`, table `state_questions`): once per durable or how-to state a model writes 3 or 4 short things a
+  person would say when they need it, without the tool's name. A prompt (or one of its clauses) within `Q_FLOOR` (0.84) of one of them qualifies
+  the state (`via asked`). A request matches a request far better than a statement of fact. Nightly writes them for new states.
+- **Clauses.** Long dictated prompts are about several things; each clause is embedded too and the best clause (less 0.03) counts.
+- **Vectors carry the object and aliases**, so a fact about a person and a tool is near the tool.
+- **Filed under the topic** (`rehome.py`): at the claim boundary a fact whose subject is a person or agent and whose object is a thing is filed
+  under the thing; existing states were re-filed by supersession.
+- **Skills are state** (`writers/skills.py`): each installed SKILL.md becomes two ordinary states (what it does, the CLIs it runs), re-read nightly.
+- **Corroborated proposals stand** (`promote.py`): two distinct sources, a merged duplicate, use in two or more turns, or an owner/verified twin.
+- `tools/recall_eval.py` reports hit rate and noise for such a set, plus how much a control replay of recent prompts would inject.
+
+Tried and dropped: boosting how-to states when the prompt "asks for a way" (the intent pattern matched nearly every prompt; noise rose, hits did not).

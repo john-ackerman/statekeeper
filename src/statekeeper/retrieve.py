@@ -169,7 +169,7 @@ _HOWTO_TEXT = re.compile(r"`[^`]+`|\b\w+\.(mjs|js|py|ps1|sh|bat|cmd|exe)\b|\s--[
                         r"\b(cli|script|tool|skill|command)\b", re.I)
 
 
-Q_FLOOR = float(__import__("os").environ.get("STATEKEEPER_Q_FLOOR", "0.82"))   # a request the state answers this close to the input (or a clause) qualifies it
+Q_FLOOR = float(__import__("os").environ.get("STATEKEEPER_Q_FLOOR", "0.84"))   # a request the state answers this close to the input (or a clause) qualifies it
 
 
 def _unit(v: list) -> list:

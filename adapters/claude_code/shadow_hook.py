@@ -122,7 +122,8 @@ def maybe_observe(state_dir: Path, now: float | None = None) -> bool:
 MARK = "[statekeeper] "
 LIVE_BUDGET = 1800
 LIVE_FLOOR = 0.78          # stricter than the 0.72 default: on 27 real prompts 0.72 injected on 25, 0.78 on 18 and halves the size
-LIVE_MAX_THINGS = 2
+LIVE_MAX_THINGS = 3
+LIVE_MAX_STATES = 4
 RECENT_TURNS = 3
 
 
@@ -143,7 +144,8 @@ def prompt_context(event: dict, store, embedder, state: dict, state_file: Path, 
     t0 = time.time()
     recent = state.get(f"recent:{session}") or []
     skip = frozenset(i for ids in recent for i in ids)
-    out = surface(store, prompt, embedder, log_turn=turn_ref, floor=LIVE_FLOOR, max_things=LIVE_MAX_THINGS, budget=LIVE_BUDGET, exclude_kinds=("agent", "person"), exclude_names=("working note",), skip_state_ids=skip)
+    out = surface(store, prompt, embedder, log_turn=turn_ref, floor=LIVE_FLOOR, max_things=LIVE_MAX_THINGS, budget=LIVE_BUDGET, exclude_kinds=("agent", "person"),
+                  exclude_names=("working note",), skip_state_ids=skip, max_states=LIVE_MAX_STATES)
     block = (MARK + out.block) if out.block else ""
     store.record_turn_text(turn_ref, "prompt", prompt[:20000], session_id=session)
     store.record_injection(turn_ref, "statekeeper", "UserPromptSubmit", "concept_map", block)

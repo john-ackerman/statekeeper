@@ -25,6 +25,22 @@ def list_open_prs(repo: str) -> list[int]:
     return [p["number"] for p in json.loads(r.stdout or "[]")]
 
 
+RECHECK_LIMIT = 15
+
+
+def held_open(store: Store, repo_name: str) -> list[int]:
+    """PR numbers of `repo_name` whose current pr.state in the store is open or draft."""
+    out = []
+    prefix = f"{repo_name} PR "
+    for t in store.things():
+        if t.retired or not t.name.startswith(prefix) or not t.name[len(prefix):].isdigit():
+            continue
+        cur = [s for s in store.states_of(t.id) if s.state_key == "pr.state" and s.status == "active"]
+        if cur and cur[0].text.startswith(("open", "draft")):
+            out.append(int(t.name[len(prefix):]))
+    return sorted(out)
+
+
 def recent_transcripts(projects_dir: Path, hours: float = 24, limit: int = 40) -> list[Path]:
     cutoff = time.time() - hours * 3600
     found = [p for p in projects_dir.glob("*/*/subagents/agent-*.jsonl") if p.stat().st_mtime >= cutoff]
@@ -44,13 +60,16 @@ def observe_everything(store: Store, *, repos=None, build_repos=None, list_prs: 
             result["errors"].append(f"list {repo}: {str(e)[:120]}")
             continue
         name = repo.split("/")[-1]
+        # PRs the store still holds as open that the open list no longer has were merged or closed: read them once more so they stop reading "open"
+        still_open = set(numbers)
+        numbers = list(numbers) + [n for n in held_open(store, name) if n not in still_open][:RECHECK_LIMIT]
         for n in numbers:
             try:
                 observe_pr(store, name, n, get_pr(repo, n))
                 result["prs"] += 1
             except Exception as e:
                 result["errors"].append(f"pr {repo}#{n}: {str(e)[:120]}")
-            if name in build_repos:
+            if name in build_repos and n in still_open:
                 try:
                     b = get_build(f"refs/pull/{n}/merge")
                     if b:

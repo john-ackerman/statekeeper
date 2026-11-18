@@ -114,6 +114,42 @@ class States(unittest.TestCase):
         self.assertEqual({"agent-7"}, actors)
 
 
+class Closing(unittest.TestCase):
+    """A state that is no longer true is closed: it stops standing (never surfaced, embedded or counted) and stays in the history with its reason."""
+    def add(self, s, thing, text):
+        return s.add_state(thing, text, evidence=[ev(text[:10])], writer="w", trust="derived", learned_how="inferred")
+
+    def test_closing_without_a_replacement_retires_the_state_and_keeps_why(self):
+        from statekeeper import surface
+        s = fresh_store()
+        st = self.add(s, "the old tool", "its hooks are not wired pending a yes")
+        with self.assertRaises(StoreError):
+            s.close_state(st.id, "  ")                                    # a reason is required
+        closed = s.close_state(st.id, "hooks are wired now", actor="owner")
+        self.assertFalse(closed.standing)
+        self.assertIn("closed", closed.resolution)
+        self.assertIn("hooks are wired now", closed.resolution)
+        self.assertEqual([], [x.id for x in s.searchable_states()])
+        self.assertEqual([], s.states_of(s.find("the old tool").id))
+        self.assertEqual("", surface(s, "the old tool hooks", None).block)
+        self.assertIn(st.id, [x.id for x in s.states_of(s.find("the old tool").id, history=True)])
+        self.assertTrue(any(e.event_type == "state-status" and e.state_id == st.id for e in s.events()))
+        with self.assertRaises(StoreError):
+            s.close_state(st.id, "again")                                 # it no longer stands
+
+    def test_closing_with_a_replacement_on_another_thing_and_reopening(self):
+        s = fresh_store()
+        old = self.add(s, "the rollout", "is at 10 percent")
+        new = self.add(s, "Jane", "moved the rollout to 50 percent")
+        with self.assertRaises(StoreError):
+            s.close_state(old.id, "self", replaced_by=old.id)
+        s.close_state(old.id, "newer number", replaced_by=new.id)
+        self.assertEqual(new.id, s.get_state(old.id).superseded_by)
+        self.assertEqual([new.id], [x.id for x in s.searchable_states()])
+        back = s.reopen(old.id, "closed by mistake", actor="owner")
+        self.assertTrue(back.standing)
+
+
 class Hints(unittest.TestCase):
     def test_a_newer_state_that_reads_as_an_update_is_hinted_and_unrelated_or_same_source_ones_are_not(self):
         s = fresh_store()

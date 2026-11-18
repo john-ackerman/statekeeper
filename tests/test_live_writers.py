@@ -38,6 +38,22 @@ class Live(unittest.TestCase):
             observe_everything(s, repos=("o/ExampleApp",), build_repos=("ExampleApp",), list_prs=lambda r: [1], get_pr=lambda repo, n: payload(), get_build=lambda ref: None)
         self.assertEqual(3, len([o for o in s.outcomes(kind="verified_right")]))
 
+    def test_a_pr_held_open_that_left_the_open_list_is_read_again_and_stops_reading_open(self):
+        s = fresh_store()
+        observe_everything(s, repos=("o/ExampleApp",), build_repos=(), list_prs=lambda r: [7], get_pr=lambda repo, n: payload(), get_build=lambda ref: None)
+        seen = []
+
+        def get_pr(repo, n):
+            seen.append(n)
+            return payload(state="MERGED", isDraft=False)
+        observe_everything(s, repos=("o/ExampleApp",), build_repos=(), list_prs=lambda r: [], get_pr=get_pr, get_build=lambda ref: None)
+        self.assertEqual([7], seen)
+        state = next(x for x in s.states_of(s.find("ExampleApp PR 7").id) if x.state_key == "pr.state")
+        self.assertEqual("merged", state.text)
+        seen.clear()
+        observe_everything(s, repos=("o/ExampleApp",), build_repos=(), list_prs=lambda r: [], get_pr=get_pr, get_build=lambda ref: None)
+        self.assertEqual([], seen)                                         # merged is final: not read again
+
     def test_old_transcripts_are_not_listed(self):
         with tempfile.TemporaryDirectory() as d:
             p = Path(d, "p", "s", "subagents")

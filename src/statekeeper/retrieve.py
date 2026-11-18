@@ -1,10 +1,12 @@
 """State-first retrieval: from an input to the current states it bears on.
 
-Three ways a state is reached:
-  named    the input spells a thing's name or alias whole;
+Every state shown must itself bear on the input (see `select`). Ways in:
+  named    the input spells a thing's name or alias whole (enough on its own only for a specific thing, or a thing's keyed current values);
   spelled  a near spelling (with a guard: a truncation or prefix of a name is another word, not a typo);
-  meaning  the input is close in meaning to a state's text (vectors over states, proposed ones included), the matched state is shown first.
-Nothing is better than noise: below the floor, nothing surfaces. Raw evidence is never injected; each state carries one evidence line and a reference.
+  meaning  the input is close in meaning to a state's text (vectors over states, proposed ones included);
+  words    the input shares rare words with a state that is nearly close enough in meaning.
+Nothing is better than noise: below the floor, nothing surfaces. Of two states about the same subject only the newer is shown. Raw evidence is never
+injected; each state carries one trust marker and one short evidence pointer.
 """
 from __future__ import annotations
 
@@ -15,7 +17,7 @@ from datetime import datetime, timezone
 from typing import Optional
 
 from .embed import Embedder, cosine
-from .store import State, Store, Thing, likely_replaces
+from .store import Evidence, State, Store, Thing, likely_replaces
 
 DEFAULT_FLOOR = 0.72
 LIVE_STALE_HOURS = 6
@@ -53,7 +55,7 @@ def fuzzy_match(seq: list[str], label: str) -> Optional[tuple[float, str]]:
     not ExampleApp). Labels under five letters are never matched fuzzily."""
     lw = words(label)
     target = "".join(lw[1:] if len(lw) > 1 and lw[0] in ("the", "a", "an") else lw)
-    if len(target) < 5 or occurrences(seq, label) > 0:
+    if len(target) < 5 or occurrences(seq, label) > 0 or any(ch.isdigit() for ch in target):     # a number is an identifier: 3345 is not a typo of 3351
         return None
     allowed = 2 if len(target) >= 9 else 1
     best: Optional[tuple[float, str]] = None
@@ -81,7 +83,7 @@ class Item:
     why: str                       # named | spelled "x" | meaning 0.78
     score: float
     states: list[State]
-    pinned: Optional[int] = None   # the state that matched by meaning, shown first
+    pinned: Optional[int] = None   # the first state that qualified for this thing
     evidence: dict = field(default_factory=dict)
 
 
@@ -92,6 +94,7 @@ class Surfaced:
 
 
 def _freshness(s: State, today: datetime) -> str:
+    """ONE short marker for how far to trust a state right now."""
     def days(ts: Optional[str]) -> Optional[int]:
         if not ts:
             return None
@@ -107,14 +110,14 @@ def _freshness(s: State, today: datetime) -> str:
         except ValueError:
             age_h = 1e9
         if age_h > LIVE_STALE_HOURS:
-            how = f"; re-check: {s.verify_handle[:80]}" if s.verify_handle else ""
+            how = f"; re-check: {s.verify_handle[:60]}" if s.verify_handle else ""
             return f"STALE, last verified {int(age_h)}h ago{how}" if s.confirmed_utc else f"STALE, never re-verified{how}"
         return f"verified {int(age_h * 60)}m ago" if age_h < 1 else f"verified {int(age_h)}h ago"
     if s.trust == "owner":
         return "owner-stated"
     if verified is not None:
         return "verified today" if verified == 0 else f"verified {verified}d ago"
-    return {"claimed": "agent-claimed, unverified", "extracted": "extracted, unreviewed"}.get(s.trust, "unverified")
+    return {"claimed": "agent-claimed", "extracted": "unreviewed", "derived": "derived"}.get(s.trust, "unverified")
 
 
 def _first_line(text: str, width: int) -> str:
@@ -122,92 +125,265 @@ def _first_line(text: str, width: int) -> str:
     return text if len(text) <= width else text[:width - 1] + "…"
 
 
-def candidates(store: Store, text: str, embedder: Optional[Embedder], floor: float, limit: int) -> list[Item]:
-    seq = words(text)
-    found: dict[int, Item] = {}
+_CAMEL = re.compile(r"(?<=[a-z0-9])(?=[A-Z])|(?<=[A-Z])(?=[A-Z][a-z])")
+STOP = frozenset("""a about above after again all also am an and any are as at be because been before being below between both but by can could did do does
+doing done down during each else even ever few for from further get gets got had has have having he her here hers him his how i if in into is it its
+itself just let like make made may maybe me might more most much must my no nor not now of off on once one only or other our out over own really same
+see seem she should so some still such sure than that the their them then there these they thing things think this those though through to too
+under until up us very want wanted was way we well were what when where whether which while who whom why will with would yeah yes yet you your
+okay ok actually something anything going gonna sweet cool thanks thank please lol oh hey""".split())
 
-    def keep(thing: Thing, why: str, score: float, pinned: Optional[int] = None) -> None:
-        held = found.get(thing.id)
-        if held is None or (why == "named" and not held.why.startswith("named")) or (held.why != "named" and score > held.score):
-            found[thing.id] = Item(thing, why, score, [], pinned)
 
+def split_identifiers(text: str) -> str:
+    """`MaxSlotWaitSeconds` also read as `Max Slot Wait Seconds`, so a config key meets the words people say for it (in meaning and word matching)."""
+    return _CAMEL.sub(" ", text)
+
+
+def terms(text: str) -> set[str]:
+    """Content words: whole words and the parts of split identifiers, at least 5 letters or carrying a digit ("2085", "e2e"), never a stop word.
+    Short words ("look", "hub" out of "GitHub") are too common in talk to say two texts share a subject."""
+    return {w for w in set(words(text)) | set(words(split_identifiers(text))) if (len(w) >= 5 or any(c.isdigit() for c in w)) and w not in STOP}
+
+
+SAME_SUBJECT = 0.80      # two qualifying states this close in meaning are about the same subject: only the newer one is shown
+NAMED_SLACK = 0.06       # a generic named thing's state may sit this far under the floor if it also shares a rare word with the input
+WORD_SLACK = 0.08        # any state may sit this far under the floor if it shares two rare words with the input
+WORD_STEP = 0.04         # ... and this much further if it shares three or more
+SPECIFIC_MAX = 6         # a thing with at most this many standing states is specific: naming it is enough to show its current states
+CLOSE_SPELLING = 0.9     # a near spelling this close ("date picker", "stake keeper") counts as naming the thing; a looser one ("service just") does not
+MAX_STATES = 5
+
+
+_PR_URL = re.compile(r"https?://github\.com/[^/\s]+/([^/\s]+)/pull/(\d+)\S*")
+
+
+def _named(store: Store, text: str, exclude_kinds: tuple, exclude_names: tuple) -> dict[int, tuple[Thing, str, float]]:
+    text = _PR_URL.sub(lambda m: f"{m.group(0)} {m.group(1)} PR {m.group(2)}", text)      # a pasted PR link names "<repo> PR <n>"
+    seq, split = words(text), words(split_identifiers(text))
+    found: dict[int, tuple[Thing, str, float]] = {}
     for tid, label in store.labels():
         thing = store.get(tid)
-        if thing is None or thing.retired:
+        if thing is None or thing.retired or thing.kind in exclude_kinds or thing.name.lower() in exclude_names:
             continue
-        if occurrences(seq, label) > 0:
-            keep(thing, "named", 1.0)
-        elif (m := fuzzy_match(seq, label)):
-            keep(thing, f'spelled "{m[1]}"', m[0])
+        if occurrences(seq, label) > 0 or (split_identifiers(label) != label and occurrences(split, split_identifiers(label)) > 0):
+            found[tid] = (thing, "named", 1.0)
+        elif tid not in found and (m := fuzzy_match(seq, label)):
+            found[tid] = (thing, f'spelled "{m[1]}"', m[0])
+    return found
+
+
+def candidates(store: Store, text: str, embedder: Optional[Embedder], floor: float, limit: int) -> list[Item]:
+    """The things `select` would show for an input, best first (for callers that want things, not states)."""
+    return select(store, text, embedder, floor=floor, max_things=limit)[0]
+
+
+def select(store: Store, text: str, embedder: Optional[Embedder], *, floor: float, max_things: int = 3, states_each: int = 2,
+           exclude_kinds: tuple = (), exclude_names: tuple = (), skip_state_ids: frozenset = frozenset(), max_states: int = MAX_STATES
+           ) -> tuple[list[Item], list[State], list[Item]]:
+    """State-first selection: every state shown must itself bear on the input, not merely belong to a thing whose name was said.
+
+    A state qualifies when
+      - it is a keyed current value (a PR's CI, an agent's status) of a thing the input names, or any state of a SPECIFIC named thing (few states);
+      - it is close in meaning to the input (cosine >= floor);
+      - it belongs to a generic named thing (a repo, a tool) and is nearly that close AND shares a rare word with the input; or
+      - it shares two rare words with the input and is nearly that close in meaning.
+    Naming "the repo" or "the tool" alone surfaces nothing. Of two qualifying states about the same subject (close in meaning, or one likely replacing
+    the other) only the newer is shown. Agents and people are never surfaced because their name was said (they are in the session core), but what was
+    learned about them can surface by meaning; their standing rule/stable states are left out (the core already shows them).
+    Returns (items shown, all qualifying states in rank order, items dropped by the caps)."""
+    named = _named(store, text, exclude_kinds, exclude_names)
+    pool = [s for s in store.searchable_states() if s.id not in skip_state_ids]
+    things: dict[int, Optional[Thing]] = {}
+
+    def thing_of(tid: int) -> Optional[Thing]:
+        if tid not in things:
+            things[tid] = store.get(tid)
+        return things[tid]
+
+    # how many standing states are about a thing (as subject or object), and whether other things sit under it: a repo or a tool everyone mentions is
+    # generic, a ticket or a customer project is specific
+    standing_count: dict[int, int] = {}
+    for s in pool:
+        for tid in {s.thing_id, s.object_id} - {None}:
+            standing_count[tid] = standing_count.get(tid, 0) + 1
+    parents = {t.parent_id for t in store.things() if t.parent_id is not None}
+    cos: dict[int, float] = {}
+    vec: dict[int, list] = {}
     if embedder is not None and text.strip():
         from .embed import ensure_vectors
         try:
             ensure_vectors(store, embedder, limit=64)
-            query = embedder.embed([text[-QUERY_CHARS:]])[0]
+            query = embedder.embed([split_identifiers(text[-QUERY_CHARS:])])[0]
         except Exception:
             query = None
         if query is not None:
-            by_state = {s.id: s for s in store.searchable_states()}
-            best: dict[int, tuple[float, int]] = {}
             for v in store.vectors("state", embedder.model):
-                s = by_state.get(v["owner_id"])
-                if s is None:
-                    continue
-                c = cosine(query, v["vector"])
-                if c >= floor and (s.thing_id not in best or c > best[s.thing_id][0]):
-                    best[s.thing_id] = (c, s.id)
-            for tid, (c, sid) in best.items():
-                thing = store.get(tid)
-                if thing is not None and tid not in found:
-                    keep(thing, f"meaning {c:.2f}", c, sid)
-    order = sorted(found.values(), key=lambda i: (i.why != "named", -i.score, i.thing.id))
-    return order[:limit]
+                vec[v["owner_id"]] = v["vector"]
+                cos[v["owner_id"]] = cosine(query, v["vector"])
+    # rare words: in at most 1% of standing states (at least 3); the words of names the input matched do not count as shared content
+    df: dict[str, int] = {}
+    state_terms: dict[int, set[str]] = {}
+    for s in pool:
+        st = terms(f"{s.thing_name} {s.text}")
+        state_terms[s.id] = st
+        for w in st:
+            df[w] = df.get(w, 0) + 1
+    rare_cut = max(3, len(pool) // 100)
+    name_words = {w for tid in named for w in words(split_identifiers(named[tid][0].name))}
+    asked = {w for w in terms(text) if df.get(w, 0) <= rare_cut and w not in name_words}
+
+    scored: list[tuple[float, State]] = []
+    for s in pool:
+        t = thing_of(s.thing_id)
+        if t is None or t.retired or t.name.lower() in exclude_names:
+            continue
+        if t.kind in exclude_kinds and s.status == "active" and s.volatility in ("rule", "stable"):
+            continue
+        c = cos.get(s.id)
+        shared = len(asked & state_terms.get(s.id, set()))
+        own = named.get(s.thing_id)
+        hit = own or (named.get(s.object_id) if s.object_id else None)
+        # naming is enough on its own only for the thing's own states, spelled whole, when the thing is specific
+        specific = own is not None and (own[1] == "named" or own[2] >= CLOSE_SPELLING) and standing_count.get(s.thing_id, 0) <= SPECIFIC_MAX and s.thing_id not in parents
+        if s.state_key:
+            if own is not None and own[1] == "named":  # a named thing's current values; never reached by meaning alone (they are short labels)
+                scored.append((2.0, s))
+            continue
+        if specific:
+            scored.append((1.0 + (c or 0.0) / 10, s))
+        elif c is not None and c >= floor:
+            scored.append((c, s))
+        elif c is not None and hit is not None and c >= floor - NAMED_SLACK and shared >= 1:
+            scored.append((c, s))
+        elif c is not None and shared >= 2 and c >= floor - WORD_SLACK - WORD_STEP * min(shared - 2, 1):
+            scored.append((c, s))
+        elif c is None and hit is not None and shared >= 2:          # meaning is down: a named generic thing still needs the input's own words
+            scored.append((0.5 + shared / 100, s))
+    scored.sort(key=lambda x: (-x[0], x[1].id))
+    # newer facts about the same subject replace older ones at injection time
+    by_thing: dict[int, list[State]] = {}
+    for _, s in scored:
+        if s.state_key is None:
+            by_thing.setdefault(s.thing_id, []).append(s)
+    replaced: set[int] = set()
+    for sts in by_thing.values():
+        if len(sts) > 1:
+            replaced |= set(likely_replaces(sts, store.evidence_of([x.id for x in sts])).values())
+    plain = [s for _, s in scored if s.state_key is None and s.id in vec]
+    kept: list[tuple[float, State]] = []
+    for score, s in scored:
+        if s.state_key is None:
+            if s.id in replaced:
+                continue
+            if s.id in vec and any(o.id != s.id and o.recency > s.recency and cosine(vec[s.id], vec[o.id]) >= SAME_SUBJECT for o in plain):
+                continue
+        kept.append((score, s))
+    items: dict[int, Item] = {}
+    order: list[int] = []
+    for score, s in kept:
+        tid = s.thing_id
+        if tid not in items:
+            hit = named.get(tid)
+            why = hit[1] if hit else f"meaning {score:.2f}"
+            items[tid] = Item(thing_of(tid), why, score, [], s.id)  # type: ignore[arg-type]
+            order.append(tid)
+        it = items[tid]
+        cap = 4 if s.state_key else states_each
+        if sum(1 for x in it.states if bool(x.state_key) == bool(s.state_key)) < cap:
+            it.states.append(s)
+    shown: list[Item] = []
+    dropped: list[Item] = []
+    shown_states = 0
+    for tid in order:
+        it = items[tid]
+        if len(shown) >= max_things or shown_states >= max_states:
+            dropped.append(it)
+            continue
+        if not any(x.state_key for x in it.states):
+            it.states = it.states[:max(1, max_states - shown_states)]
+        shown_states += sum(1 for x in it.states if not x.state_key) + (1 if any(x.state_key for x in it.states) else 0)   # a thing's keyed values are one line
+        shown.append(it)
+    return shown, [s for _, s in kept], dropped
+
+
+def _pointer(ev: list[Evidence]) -> str:
+    if not ev:
+        return ""
+    e = ev[0]
+    kind = {"message": "msg", "legacy-source": "src", "prototype": "src"}.get(e.ref_type, e.ref_type)
+    return f"{kind} {_first_line(e.ref, 28)}"
+
+
+AGENT_WORDS = frozenset({"agents", "shepherds", "subagents"})     # plural: "how are the agents doing", not "running a local agent"
+STATUS_WORDS = frozenset({"running", "working", "stuck", "silent", "status", "alive", "activity", "progress", "doing", "finished", "done", "hung", "stalled"})
+
+
+def _agents_line(store: Store, text: str, today: datetime, skip: frozenset) -> tuple[str, list[int]]:
+    """When the input asks how agents are doing, one line of what the live agent.status states that changed in the last hours say now."""
+    seq = words(text)
+    agent_at = [i for i, w in enumerate(seq) if w in AGENT_WORDS]
+    if not any(seq[j] in STATUS_WORDS for i in agent_at for j in range(max(0, i - 3), min(len(seq), i + 4))):
+        return "", []                                  # "agents" and a status word close together: the input asks how agents are doing
+    by_status: dict[str, list[str]] = {}
+    ids: list[int] = []
+    for s in store.searchable_states():
+        if s.state_key != "agent.status" or s.id in skip:
+            continue
+        try:
+            seen_h = (today - datetime.fromisoformat((s.confirmed_utc or s.recorded_utc)[:19]).replace(tzinfo=timezone.utc)).total_seconds() / 3600
+            changed_h = (today - datetime.fromisoformat(s.recorded_utc[:19]).replace(tzinfo=timezone.utc)).total_seconds() / 3600
+        except ValueError:
+            continue
+        if seen_h > LIVE_STALE_HOURS or changed_h > LIVE_STALE_HOURS:      # not re-read lately, or a status that has not changed in hours (a dead agent)
+            continue
+        by_status.setdefault((s.text.split() or ["?"])[0], []).append(s.thing_name)
+        ids.append(s.id)
+    if not ids:
+        return "", []
+    parts = [f"{k} {len(v)}" + (f" ({', '.join(sorted(v)[:4])})" if k in ("working", "silent") else "") for k, v in sorted(by_status.items())]
+    lines = ["Agents now (agent.status read from transcripts, last 6h): " + "; ".join(parts)]
+    # the standing rules about agents belong next to their status (e.g. which ones can still be resumed)
+    for s in store.searchable_states():
+        if s.kind == "rule" and s.status == "active" and s.id not in skip and {w.rstrip("s") + "s" for w in words(s.thing_name)} & AGENT_WORDS and len(lines) < 3:
+            lines.append(f"  #{s.id} {_first_line(s.text, 200)} [{_freshness(s, today)}]")
+            ids.append(s.id)
+    return "\n".join(lines), ids
 
 
 def surface(store: Store, text: str, embedder: Optional[Embedder] = None, *, floor: Optional[float] = None, max_things: int = 3,
             states_each: int = 2, budget: int = 2500, today: Optional[datetime] = None, log_turn: Optional[str] = None,
-            exclude_kinds: tuple = (), exclude_names: tuple = (), skip_state_ids: frozenset = frozenset()) -> Surfaced:
-    """The state block for an input: at most `max_things` things, `states_each` states each, newest first (the state that matched by meaning first),
-    each with its freshness label, `[newer than #N]` where it likely replaces an older standing one, and one evidence line; within `budget` characters,
-    saying what it left out. Empty when nothing bears on the input."""
+            exclude_kinds: tuple = (), exclude_names: tuple = (), skip_state_ids: frozenset = frozenset(), max_states: int = MAX_STATES) -> Surfaced:
+    """The state block for an input (see `select` for what qualifies): at most `max_things` things and `max_states` states, only the newest about any
+    one subject, one line each with ONE trust marker and one short evidence pointer, within `budget` characters, saying what it left out. Empty when
+    nothing bears on the input."""
     today = today or datetime.now(timezone.utc)
     floor = store.get_param("relevance_floor", DEFAULT_FLOOR) if floor is None else floor
-    items = candidates(store, text, embedder, floor, max_things + 6)
-    if not items:
+    items, _, dropped = select(store, text, embedder, floor=floor, max_things=max_things, states_each=states_each, exclude_kinds=exclude_kinds,
+                               exclude_names=exclude_names, skip_state_ids=skip_state_ids, max_states=max_states)
+    agents, agent_ids = _agents_line(store, text, today, skip_state_ids)
+    if not items and not agents:
         return Surfaced("", [])
-    dropped: list[Item] = []
-    lines = ["Current state for this input (each with how sure to be; `[#id]` is the state, evidence is one line; raw history is not shown):"]
+    lines = ["Current state bearing on this input (#id = state; [how sure · evidence]; raw history is not shown):"]
     shown: list[Item] = []
-    omitted: list[str] = []
+    omitted: list[str] = [i.thing.name for i in dropped]
     for item in items:
-        if len(shown) >= max_things:
-            omitted.append(item.thing.name)
-            dropped.append(item)
-            continue
-        if item.thing.kind in exclude_kinds or item.thing.name.lower() in exclude_names:
-            continue                      # e.g. the agent and people are in the session-start core, not repeated per prompt
-        states = [s for s in store.states_of(item.thing.id) if s.id not in skip_state_ids]
-        if not states:
-            continue
-        ev = store.evidence_of([s.id for s in states])
-        hints = likely_replaces(states, ev)
-        order = [s for s in sorted(states, key=lambda s: s.recency, reverse=True) if s.id == item.pinned] + \
-                [s for s in sorted(states, key=lambda s: s.recency, reverse=True) if s.id != item.pinned]
-        keyed = [s for s in order if s.state_key and s.status == "active"]
-        item.states = order[:states_each] + [s for s in keyed if s not in order[:states_each]][:4]   # a thing's current keyed states all show
+        ev = store.evidence_of([s.id for s in item.states])
         item.evidence = ev
-        chunk = [f"\n{item.thing.name} ({item.thing.kind}; {item.why}):"]
-        seen_ev: set = set()
+        chunk = [f"{item.thing.name} ({item.thing.kind}; {item.why}):"]
+        keyed = [s for s in item.states if s.state_key]
+        if keyed:
+            # a thing's current values (a PR's state, review, CI) on ONE line, with the oldest verification as its marker and one way to re-check
+            oldest = min(keyed, key=lambda s: s.confirmed_utc or s.recorded_utc)
+            mark = _freshness(oldest, today).split("; re-check")[0]
+            how = next((s.verify_handle for s in keyed if s.verify_handle), None)
+            chunk.append(f"  {' | '.join(f'#{s.id} {s.state_key.split(".")[-1]}: {_first_line(s.text, 90)}' for s in keyed)} [{mark}{' · re-check: ' + _first_line(how, 70) if how else ''}]")
         for s in item.states:
-            tags = [_freshness(s, today)] + (["proposed"] if s.status == "proposed" else []) + ([f"newer than #{hints[s.id]}"] if s.id in hints else [])
+            if s.state_key:
+                continue
             rel = f" -> {s.object_name}" if s.object_name else ""
             label = f"{s.state_key}: " if s.state_key else ""
-            chunk.append(f"  [#{s.id}] {label}{_first_line(s.text, 230)}{rel} ({'; '.join(tags)})")
-            if ev.get(s.id):
-                e = ev[s.id][0]
-                if e.excerpt and (e.ref_type, e.ref) not in seen_ev:
-                    seen_ev.add((e.ref_type, e.ref))
-                    chunk.append(f'    {e.ref_type} {e.ref}: "{_first_line(e.excerpt, 140)}"')
+            ptr = _pointer(ev.get(s.id, []))
+            chunk.append(f"  #{s.id} {label}{_first_line(s.text, 200)}{rel} [{_freshness(s, today)}{' · ' + ptr if ptr else ''}]")
         block = "\n".join(chunk)
         if sum(len(x) + 1 for x in lines) + len(block) > budget:
             omitted.append(item.thing.name)
@@ -215,16 +391,22 @@ def surface(store: Store, text: str, embedder: Optional[Embedder] = None, *, flo
             continue
         lines.append(block)
         shown.append(item)
+    if agents and sum(len(x) + 1 for x in lines) + len(agents) <= budget:
+        lines.append(agents)
+    else:
+        agent_ids = []
     if log_turn:
         for item in shown:
             for s in item.states:
                 store.log_outcome(s.id, "surfaced", source="surface", turn_ref=log_turn, detail=json.dumps({"why": item.why, "status": s.status, "trust": s.trust}))
+        for sid in agent_ids:
+            store.log_outcome(sid, "surfaced", source="surface", turn_ref=log_turn, detail=json.dumps({"why": "agents line"}))
         for item in dropped:
-            top = sorted(store.states_of(item.thing.id), key=lambda s: s.recency, reverse=True)[:1]
+            top = item.states[:1] or sorted(store.states_of(item.thing.id), key=lambda s: s.recency, reverse=True)[:1]
             if top:
                 store.log_outcome(top[0].id, "omitted", source="surface", turn_ref=log_turn, detail=json.dumps({"why": item.why}))
-    if not shown:
+    if not shown and not agent_ids:
         return Surfaced("", [])
     if omitted:
-        lines.append(f"\n{len(omitted)} omitted: {', '.join(omitted[:4])}")
+        lines.append(f"{len(omitted)} omitted: {', '.join(omitted[:4])}")
     return Surfaced("\n".join(lines), shown)

@@ -135,6 +135,7 @@ class Store(Protocol):
     def accept(self, state_id: int, reason: str = "", *, actor: str = "owner") -> State: ...
     def reject(self, state_id: int, reason: str, *, actor: str = "owner") -> State: ...
     def supersede(self, old_id: int, new_id: int, reason: str = "", *, actor: str = "owner") -> None: ...
+    def close_state(self, state_id: int, reason: str, *, replaced_by: int | None = None, actor: str = "owner") -> State: ...
     def confirm(self, state_id: int, *, actor: str, at: str | None = None) -> State: ...
     def log_outcome(self, state_id: int | None, kind: str, *, source: str, thing_id: int | None = None, turn_ref: str | None = None, detail: str | None = None) -> int: ...
     def outcomes(self, *, kind: str | None = None, state_id: int | None = None, turn_ref: str | None = None) -> list["Outcome"]: ...
@@ -453,6 +454,25 @@ class SqliteStore:
         with self._tx(actor) as db:
             db.execute("UPDATE states SET superseded_by = ?, resolution = ? WHERE id = ?", (new_id, reason or f"superseded by #{new_id}", old_id))
 
+    def close_state(self, state_id, reason, *, replaced_by=None, actor="owner") -> State:
+        """Retires a standing state that is no longer true, so it stops being surfaced, embedded and counted; it stays in the history with its reason.
+        With `replaced_by`, the standing state that now says what is true (it may be about another thing: a fact often moves, e.g. from a project to the
+        person who changed it). Without one nothing replaces it, and the state points at itself: superseded_by = its own id reads as "closed". Every
+        query that asks for standing states already excludes both. `reopen` undoes it."""
+        if not reason.strip():
+            raise StoreError("closing a state needs its reason: it is kept so the state is not learned again")
+        s = self._standing_or_refuse(state_id)
+        if not s.standing:
+            raise StoreError(f"#{state_id} no longer stands")
+        if replaced_by is not None:
+            new = self._standing_or_refuse(replaced_by)
+            if new.id == s.id or not new.standing:
+                raise StoreError(f"#{replaced_by} cannot replace #{state_id}: it must be another standing state")
+        with self._tx(actor) as db:
+            db.execute("UPDATE states SET superseded_by = ?, resolution = ? WHERE id = ?",
+                       (replaced_by or state_id, f"closed {now()[:10]}" + (f" (replaced by #{replaced_by})" if replaced_by else "") + f": {reason.strip()}", state_id))
+        return self.get_state(state_id)  # type: ignore[return-value]
+
     def confirm(self, state_id, *, actor, at=None) -> State:
         self._standing_or_refuse(state_id)
         with self._tx(actor) as db:
@@ -532,12 +552,17 @@ class SqliteStore:
         return [tuple(r) for r in self.db.execute("SELECT a_state, b_state, relation, score FROM state_links WHERE a_state = ? OR b_state = ? ORDER BY id", (state_id, state_id))]
 
     def reopen(self, state_id, reason, *, actor) -> State:
-        """Undoes a rejection (an unmerge): a rejected state goes back to proposed, with the reason in its resolution. The owner's reversal of a consolidation."""
+        """Undoes a rejection (an unmerge) or a close: a rejected state goes back to proposed, a closed or superseded one stands again, with the reason in
+        its resolution. The owner's reversal of a consolidation or a close."""
         st = self.get_state(state_id)
-        if not st or st.status != "rejected":
-            raise StoreError(f"#{state_id} is not rejected")
         if not reason.strip():
             raise StoreError("reopening needs its reason")
+        if st and st.superseded_by is not None and st.status in ("active", "proposed"):
+            with self._tx(actor) as db:
+                db.execute("UPDATE states SET superseded_by = NULL, resolution = ? WHERE id = ?", (f"reopened {now()[:10]}: {reason.strip()}", state_id))
+            return self.get_state(state_id)  # type: ignore[return-value]
+        if not st or st.status != "rejected":
+            raise StoreError(f"#{state_id} is not rejected or closed")
         with self._tx(actor) as db:
             db.execute("UPDATE states SET status = 'proposed', resolution = ? WHERE id = ?", (f"reopened {now()[:10]}: {reason.strip()}", state_id))
         return self.get_state(state_id)  # type: ignore[return-value]

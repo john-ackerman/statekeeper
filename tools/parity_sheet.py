@@ -1,6 +1,7 @@
 """A short judging sheet (self-contained HTML) of real turns: what Legacy actually injected vs what statekeeper would inject now. The owner judges which is more useful.
 
     python tools/parity_sheet.py [--db ~/.claude/statekeeper/shadow.db] [--n 24] [--out ~/.claude/statekeeper/reports/parity-sheet.html]
+                                 [--turns-from <an earlier sheet.html>]     re-measure the same turns, in the same order, with today's code and store
 
 Sampled (seeded) from turns where at least one side surfaced something, plus a few where neither did (to judge quiet). Statekeeper's side is recomputed now
 with the live settings (agent/people and the working note left out, budget 1800 chars). Nothing here changes any store except reading. The sheet judges
@@ -58,6 +59,7 @@ def main() -> int:
     ap.add_argument("--db", default=str(Path.home() / ".claude" / "statekeeper" / "shadow.db"))
     ap.add_argument("--n", type=int, default=24)
     ap.add_argument("--out", default=str(Path.home() / ".claude" / "statekeeper" / "reports" / "parity-sheet.html"))
+    ap.add_argument("--turns-from", default=None, help="an earlier sheet: judge the same prompts again")
     args = ap.parse_args()
     store = SqliteStore(args.db)
     emb = HttpEmbedder(timeout=3.0)
@@ -67,13 +69,20 @@ def main() -> int:
     for ref, text in prompts.items():
         if text.lstrip().startswith("<") or len(text) < 20:
             continue                                          # automated prompts
-        ours = surface(store, text, emb, floor=shadow_hook.LIVE_FLOOR, max_things=shadow_hook.LIVE_MAX_THINGS, budget=shadow_hook.LIVE_BUDGET, exclude_kinds=("agent", "person"), exclude_names=("working note",)).block
+        ours = surface(store, text, emb, floor=shadow_hook.LIVE_FLOOR, max_things=shadow_hook.LIVE_MAX_THINGS, budget=shadow_hook.LIVE_BUDGET, exclude_kinds=("agent", "person"),
+                       exclude_names=("working note",), max_states=shadow_hook.LIVE_MAX_STATES).block
         rows.append((ref, text, theirs.get(ref, ""), (shadow_hook.MARK + ours) if ours else ""))
     either = [r for r in rows if r[2].strip() or r[3].strip()]
     neither = [r for r in rows if not (r[2].strip() or r[3].strip())]
-    rng = random.Random(20261117)
-    pick = rng.sample(either, min(args.n - 4, len(either))) + rng.sample(neither, min(4, len(neither)))
-    rng.shuffle(pick)
+    if args.turns_from:
+        import re
+        earlier = [html.unescape(m) for m in re.findall(r'<div class="msg"><b>#\d+</b> (.*?)</div>', Path(args.turns_from).read_text(encoding="utf-8"), re.S)]
+        by_head = {text[:500]: r for r in rows for text in [r[1]]}
+        pick = [by_head[m] for m in earlier if m in by_head]
+    else:
+        rng = random.Random(20261117)
+        pick = rng.sample(either, min(args.n - 4, len(either))) + rng.sample(neither, min(4, len(neither)))
+        rng.shuffle(pick)
     body = "".join(
         f'<section class="turn"><div class="msg"><b>#{i}</b> {html.escape(text[:500])}</div><div class="cols"><div class="col"><h3>Legacy (actual)</h3>{block(p)}</div>'
         f'<div class="col"><h3>Statekeeper (would inject)</h3>{block(s)}</div></div><div class="pick" data-k="t{i}">'

@@ -10,6 +10,8 @@ Search order, first file found wins: the path in STATEKEEPER_CONFIG, `local/conf
                            the nightly job re-imports it incrementally when present
     session_refresh_command ["python", "script.py"]  run (bounded, 20 s) by the live SessionStart hook before it prints the session block, e.g. to
                            re-read the core and the working note from wherever they are kept
+    embed_server_command   ["path/to/start-embedding-server.cmd"]  started detached by the live SessionStart hook when nothing answers at
+                           STATEKEEPER_EMBED_URL (meaning-based recall needs it)
 """
 from __future__ import annotations
 

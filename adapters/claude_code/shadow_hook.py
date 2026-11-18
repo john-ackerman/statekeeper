@@ -14,6 +14,7 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+import re
 import sys
 import time
 from pathlib import Path
@@ -130,7 +131,26 @@ LIVE_BUDGET = 1800
 LIVE_FLOOR = 0.78          # stricter than the 0.72 default: on 27 real prompts 0.72 injected on 25, 0.78 on 18 and halves the size
 LIVE_MAX_THINGS = 3
 LIVE_MAX_STATES = 4
-RECENT_TURNS = 3
+RECENT_TURNS = 6            # injections remembered per session ...
+RECENT_SECONDS = 45 * 60    # ... for this long: a thing shown in that window is not shown again unless one of its states changed
+_AUTOMATED = re.compile(r"^<(task-notification|agent-message|system-reminder|local-command|command-[a-z]+|bash-[a-z]+|user-prompt-submit-hook)\b")
+
+
+def is_automated(prompt: str) -> bool:
+    """A turn the harness or an agent produced (a Monitor/task notification, a subagent's hand-back, a slash-command echo), not the person typing."""
+    return bool(_AUTOMATED.match(prompt.lstrip()))
+
+
+def update_state(state_file: Path, change) -> dict:
+    """Read the state file fresh, apply `change`, write it back (kept short). Hooks run concurrently (the async Stop of one turn and the next prompt),
+    so writing back a copy loaded earlier would drop the other hook's update."""
+    try:
+        st = json.loads(state_file.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        st = {}
+    change(st)
+    state_file.write_text(json.dumps(dict(list(st.items())[-300:])), encoding="utf-8")
+    return st
 
 
 def inject_on() -> bool:
@@ -148,18 +168,28 @@ def prompt_context(event: dict, store, embedder, state: dict, state_file: Path, 
         return {}, ""
     turn_ref = f"{session}:{int(time.time() * 1000)}"
     t0 = time.time()
-    recent = state.get(f"recent:{session}") or []
-    skip = frozenset(i for ids in recent for i in ids)
-    out = surface(store, prompt, embedder, log_turn=turn_ref, floor=LIVE_FLOOR, max_things=LIVE_MAX_THINGS, budget=LIVE_BUDGET, exclude_kinds=("agent", "person"),
-                  exclude_names=("working note",), skip_state_ids=skip, max_states=LIVE_MAX_STATES)
+    now_s = time.time()
+    automated = is_automated(prompt)
+    recent = [r for r in (state.get(f"recent:{session}") or []) if isinstance(r, dict) and now_s - r.get("at", 0) <= RECENT_SECONDS][-RECENT_TURNS:]
+    skip = set(i for r in recent for i in r.get("states", []))
+    # a thing shown lately stays out until one of its states changes: its OTHER states are not a reason to show it again
+    for r in recent:
+        shown_at = time.strftime("%Y-%m-%d %H:%M:%S", time.gmtime(r.get("at", 0)))
+        for tid in r.get("things", []):
+            skip |= {s.id for s in store.states_of(tid) if (s.recorded_utc or "")[:19] <= shown_at}
+    if automated:
+        from statekeeper.retrieve import Surfaced
+        out = Surfaced("", [])           # a task notification or an agent's hand-back is not a question from the person: inject nothing
+    else:
+        out = surface(store, prompt, embedder, log_turn=turn_ref, floor=LIVE_FLOOR, max_things=LIVE_MAX_THINGS, budget=LIVE_BUDGET, exclude_kinds=("agent", "person"),
+                      exclude_names=("working note",), skip_state_ids=frozenset(skip), max_states=LIVE_MAX_STATES)
     block = (MARK + out.block) if out.block else ""
     store.record_turn_text(turn_ref, "prompt", prompt[:20000], session_id=session)
     store.record_injection(turn_ref, "statekeeper", "UserPromptSubmit", "concept_map", block)
-    state[session] = turn_ref
-    state[f"recent:{session}"] = (recent + [[s.id for i in out.items for s in i.states]])[-RECENT_TURNS:]
-    state_file.write_text(json.dumps(dict(list(state.items())[-300:])), encoding="utf-8")
+    shown = {"at": now_s, "states": [s.id for i in out.items for s in i.states], "things": [i.thing.id for i in out.items]}
+    update_state(state_file, lambda st: st.update({session: turn_ref, f"recent:{session}": (recent + ([shown] if shown["states"] else []))[-RECENT_TURNS:]}))
     rec = {"event": "UserPromptSubmit", "session": session, "turn": turn_ref, "things": [i.thing.name for i in out.items], "block_chars": len(block), "ms": int((time.time() - t0) * 1000),
-           "prompt_sha": hashlib.sha256(prompt.encode("utf-8")).hexdigest()[:12], "live": inject_on()}
+           "prompt_sha": hashlib.sha256(prompt.encode("utf-8")).hexdigest()[:12], "live": inject_on(), "automated": automated}
     rec["observe_started"] = maybe_observe(state_dir) if os.environ.get("STATEKEEPER_NO_OBSERVE_IN_TESTS") != "1" else False
     log(rec)
     return rec, block
@@ -201,7 +231,7 @@ def handle(event: dict, store, embedder, state_dir: Path) -> dict:
                 if pending:
                     for hook, text in injected_since(event["transcript_path"], pending["at"] - 10, "SessionStart"):
                         store.record_injection(pending["ref"], "legacy", hook, classify(text), text[:60000])
-                    state_file.write_text(json.dumps(state), encoding="utf-8")
+                    update_state(state_file, lambda st: st.pop(f"start:{session}", None))
             except (OSError, ValueError, IndexError):
                 pass
         rec = {"event": name, "session": session, "turn": turn_ref, "used": counts["used"], "missed": counts["missed"], "commitments": len(find_commitments(answer)), "answer_chars": len(answer)}
@@ -212,8 +242,7 @@ def handle(event: dict, store, embedder, state_dir: Path) -> dict:
         ref = f"sess:{session}:{int(time.time() * 1000)}"
         block = session_block(store)
         store.record_injection(ref, "statekeeper", f"SessionStart:{event.get('source') or 'startup'}", "session_core", block)
-        state[f"start:{session}"] = {"ref": ref, "at": time.time()}
-        state_file.write_text(json.dumps(dict(list(state.items())[-200:])), encoding="utf-8")
+        update_state(state_file, lambda st: st.update({f"start:{session}": {"ref": ref, "at": time.time()}}))
         rec = {"event": name, "session": session, "source": event.get("source"), "block_chars": len(block)}
         log(rec)
         return rec

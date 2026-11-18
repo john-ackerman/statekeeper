@@ -3,6 +3,7 @@ import os
 import subprocess
 import sys
 import tempfile
+import time
 import unittest
 from pathlib import Path
 
@@ -164,6 +165,30 @@ class Inject(unittest.TestCase):
             r = subprocess.run([sys.executable, str(ROOT / "adapters" / "claude_code" / "inject_hook.py")], input=body, capture_output=True, env=env)
             self.assertIn("caps replicas at 75", json.loads(r.stdout)["hookSpecificOutput"]["additionalContext"])
             self.assertNotIn("error", Path(d, "shadow.log.jsonl").read_text(encoding="utf-8"))
+
+    def test_automated_turns_get_nothing_and_a_thing_shown_lately_is_not_shown_again_until_it_changes(self):
+        with tempfile.TemporaryDirectory() as d:
+            db = os.path.join(d, "s.db")
+            st = SqliteStore(db)
+            for i in range(4):
+                st.add_state("the converter", f"converter fact {i} about replicas", evidence=[ev(f"m{i}")], writer="rule:t", trust="verified", learned_how="read")
+            st.close()
+            note = "<task-notification>\n<summary>Monitor event: the converter replicas</summary>\n</task-notification>"
+            self.assertEqual("", self.run_inject(note, db, d, "1").stdout)
+            first = json.loads(self.run_inject("the converter replicas?", db, d, "1").stdout)["hookSpecificOutput"]["additionalContext"]
+            self.assertIn("converter fact", first)
+            self.assertEqual("", self.run_inject("the converter replicas, again?", db, d, "1").stdout)       # not its other states either
+            st = SqliteStore(db)
+            time.sleep(1.1)
+            st.add_state("the converter", "converter now caps replicas at 70", evidence=[ev("m9")], writer="rule:t", trust="verified", learned_how="read")
+            st.close()
+            third = json.loads(self.run_inject("the converter replicas now?", db, d, "1").stdout)["hookSpecificOutput"]["additionalContext"]
+            self.assertIn("caps replicas at 70", third)
+            self.assertNotIn("converter fact", third)
+            st = SqliteStore(db)
+            prompts = [t for _, _, _, t in st.turn_texts("prompt")]
+            st.close()
+            self.assertIn(note, prompts)                                                                  # still recorded
 
     def test_a_broken_event_never_fails_the_turn_or_prints(self):
         with tempfile.TemporaryDirectory() as d:

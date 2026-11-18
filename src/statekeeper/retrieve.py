@@ -149,6 +149,7 @@ SAME_SUBJECT = 0.80      # two qualifying states this close in meaning are about
 NAMED_SLACK = 0.06       # a generic named thing's state may sit this far under the floor if it also shares a rare word with the input
 WORD_SLACK = 0.08        # any state may sit this far under the floor if it shares two rare words with the input
 WORD_STEP = 0.04         # ... and this much further if it shares three or more
+GENERIC_MENTIONS = 15    # ... and a thing whose name appears in more than this many states' text (or 2% of them) is generic whatever its own count
 SPECIFIC_MAX = 6         # a thing with at most this many standing states is specific: naming it is enough to show its current states
 CLOSE_SPELLING = 0.9     # a near spelling this close ("date picker", "stake keeper") counts as naming the thing; a looser one ("service just") does not
 MAX_STATES = 5
@@ -207,6 +208,15 @@ def select(store: Store, text: str, embedder: Optional[Embedder], *, floor: floa
         for tid in {s.thing_id, s.object_id} - {None}:
             standing_count[tid] = standing_count.get(tid, 0) + 1
     parents = {t.parent_id for t in store.things() if t.parent_id is not None}
+    # a name that many states mention in passing ("board", a tool, a repo) is a common word here, not a pointer to one subject
+    texts = None
+    mentioned_widely: set[int] = set()
+    for tid, (thing, _why, _score) in named.items():
+        if texts is None:
+            texts = [words(split_identifiers(s.text)) for s in pool]
+        label = split_identifiers(thing.name)
+        if sum(1 for w in texts if occurrences(w, label) > 0) > max(GENERIC_MENTIONS, len(pool) // 50):
+            mentioned_widely.add(tid)
     cos: dict[int, float] = {}
     vec: dict[int, list] = {}
     if embedder is not None and text.strip():
@@ -244,7 +254,8 @@ def select(store: Store, text: str, embedder: Optional[Embedder], *, floor: floa
         own = named.get(s.thing_id)
         hit = own or (named.get(s.object_id) if s.object_id else None)
         # naming is enough on its own only for the thing's own states, spelled whole, when the thing is specific
-        specific = own is not None and (own[1] == "named" or own[2] >= CLOSE_SPELLING) and standing_count.get(s.thing_id, 0) <= SPECIFIC_MAX and s.thing_id not in parents
+        specific = own is not None and (own[1] == "named" or own[2] >= CLOSE_SPELLING) and standing_count.get(s.thing_id, 0) <= SPECIFIC_MAX and s.thing_id not in parents \
+            and s.thing_id not in mentioned_widely
         if s.state_key:
             if own is not None and own[1] == "named":  # a named thing's current values; never reached by meaning alone (they are short labels)
                 scored.append((2.0, s))

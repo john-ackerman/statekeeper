@@ -116,6 +116,12 @@ class Relevance(unittest.TestCase):
         self.add("Datepicker", "specs only pass after a real dotnet build")
         self.assertIn("real dotnet build", surface(self.s, "check every date picker in the app", self.emb, today=self.today).block)
 
+    def test_a_name_many_states_mention_in_passing_is_generic_however_few_states_it_has(self):
+        self.add("board", "points on board issues are Fibonacci numbers")
+        for i in range(20):
+            self.add(f"item {i}", f"item {i} sits on the board in column {i}")
+        self.assertNotIn("Fibonacci", surface(self.s, "PR 7 approved, update the board", None, today=self.today).block)
+
     def test_naming_a_specific_thing_shows_its_states(self):
         self.add("Acme", "import fix not yet confirmed in prod")
         out = surface(self.s, "are the Acme PRs ready?", self.emb, today=self.today)

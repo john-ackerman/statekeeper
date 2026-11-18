@@ -104,3 +104,9 @@ Changes:
 - `tools/recall_eval.py` reports hit rate and noise for such a set, plus how much a control replay of recent prompts would inject.
 
 Tried and dropped: boosting how-to states when the prompt "asks for a way" (the intent pattern matched nearly every prompt; noise rose, hits did not).
+
+**Atoms, not documents (added the same day).** An imported document or long note stored as one state is close in meaning to many prompts and
+right for few, so it adds noise. `decompose.py` splits a long state (or the document behind it) into standalone facts, each filed under the thing
+it is about and citing the source and the parent; the parent is superseded. The bulk of what a session is shown should be such states; the source
+stays as evidence (`sk show <parent>`), and only recent turns carry conversational recency. The nightly job decomposes new long states before
+writing their requests, so long free-text claims end up atomic too.

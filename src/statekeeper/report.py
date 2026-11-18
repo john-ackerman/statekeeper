@@ -71,5 +71,8 @@ def health_text(h: dict) -> str:
         us = h["usefulness"]
         lines.append(f"shown {us['shown']} state-turns, used {us['used']} ({us['used_pct']}%); corrections {us['contradicted']}, explicit feedback {us['explicit_feedback']}; "
                      f"open flags {h.get('open_flags', 0)}" + (f"; shown most, never used: {', '.join(us['shown_most_unused'])}" if us["shown_most_unused"] else ""))
+    if h.get("weak_connections"):
+        lines.append("relatedness audit (shown 3+ turns through a weak connection, never used; candidates for `curate.py unlink`): "
+                     + ", ".join(f"#{w['state']} x{w['weak']} via {w['via']}" for w in h["weak_connections"][:5]))
     lines += [f"  {e}" for e in h["errors"]]
     return "\n".join(lines) + "\n"

@@ -157,6 +157,7 @@ MAX_STATES = 5
 TOPIC_ON = 0.6           # a thing whose conversation-topic score is at least this is what we are talking about now (see select, topic=)
 TOPIC_SLACK = 0.08       # an on-topic thing's state may sit this far under the floor, with no rare word needed
 TOPIC_NEAR = 0.04        # an on-topic thing not named in this input: its states may sit this far under the floor
+CONCEPT_SIM = 0.80       # an input this close in meaning to an unlinked concept (or carrying its words) is "about" it
 WEIGHT_SPAN = 0.10       # a usefulness weight w moves a state's meaning score by (w - 1) * WEIGHT_SPAN (w is kept in 0.5..1.1, so -0.05..+0.01)
 
 
@@ -233,6 +234,7 @@ def select(store: Store, text: str, embedder: Optional[Embedder], *, floor: floa
         label = split_identifiers(thing.name)
         if sum(1 for w in texts if occurrences(w, label) > 0) > max(GENERIC_MENTIONS, len(pool) // 50):
             mentioned_widely.add(tid)
+    query = None
     cos: dict[int, float] = {}
     vec: dict[int, list] = {}
     if embedder is not None and text.strip():
@@ -258,6 +260,36 @@ def select(store: Store, text: str, embedder: Optional[Embedder], *, floor: floa
     name_words = {w for tid in named for w in words(split_identifiers(named[tid][0].name))}
     asked = {w for w in terms(text) if df.get(w, 0) <= rare_cut and w not in name_words}
 
+    # negative links: a person said these are not connected
+    blocked_any: dict[int, set[int]] = {}      # state -> things that, when named or on topic, keep it out
+    blocked_name: dict[int, set[int]] = {}     # state -> things it must not connect through
+    meaning_off: set[int] = set()              # states that surface only through their own name
+    pairs: dict[int, set[int]] = {}            # thing -> things that never connect its states
+    concept_off: set[int] = set()
+    live = store.unlinks() if hasattr(store, "unlinks") else []
+    present = set(named) | on_topic
+    low_words = words(split_identifiers(text))
+    concept_vec: dict[str, list] = {}
+    for un in live:
+        if un.state_id is None:
+            pairs.setdefault(un.thing_id, set()).add(un.other_thing_id)
+            pairs.setdefault(un.other_thing_id, set()).add(un.thing_id)
+        elif un.concept:
+            about = occurrences(low_words, un.concept) > 0
+            if not about and query is not None and embedder is not None:
+                try:
+                    if un.concept not in concept_vec:
+                        concept_vec[un.concept] = embedder.embed([un.concept])[0]
+                    about = cosine(query, concept_vec[un.concept]) >= CONCEPT_SIM
+                except Exception:
+                    about = False
+            if about:
+                concept_off.add(un.state_id)
+        elif un.thing_id is None:
+            meaning_off.add(un.state_id)
+        else:
+            (blocked_any if un.match == "any" else blocked_name).setdefault(un.state_id, set()).add(un.thing_id)
+    reasons: dict[int, dict] = {}
     scored: list[tuple[float, State]] = []
     for s in pool:
         t = thing_of(s.thing_id)
@@ -265,36 +297,55 @@ def select(store: Store, text: str, embedder: Optional[Embedder], *, floor: floa
             continue
         if t.kind in exclude_kinds and s.status == "active" and s.volatility in ("rule", "stable"):
             continue
-        c = cos.get(s.id)
+        cut = blocked_name.get(s.id, set()) | blocked_any.get(s.id, set()) | pairs.get(s.thing_id, set())
+        if s.id in concept_off or (blocked_any.get(s.id, set()) | pairs.get(s.thing_id, set())) & present:
+            continue                                                  # unlinked from something this input is about
+        raw = cos.get(s.id)
+        c = raw
         if c is not None and s.id in weights:
             c += (weights[s.id] - 1.0) * WEIGHT_SPAN
         shared = len(asked & state_terms.get(s.id, set()))
-        topical = s.thing_id in on_topic
-        own = named.get(s.thing_id)
-        hit = own or (named.get(s.object_id) if s.object_id else None)
+        topical = s.thing_id in on_topic and s.thing_id not in cut
+        own = named.get(s.thing_id) if s.thing_id not in cut else None
+        obj = named.get(s.object_id) if s.object_id and s.object_id not in cut else None
+        hit = own or obj
+        if s.id in meaning_off:
+            c = None                                                  # surfaces only through its own name
+        why_named = (lambda h: {"via": h[1].split()[0], "thing": h[0].name})
         # naming is enough on its own only for the thing's own states, spelled whole, when the thing is specific
         specific = own is not None and (own[1] == "named" or own[2] >= CLOSE_SPELLING) and standing_count.get(s.thing_id, 0) <= SPECIFIC_MAX and s.thing_id not in parents \
             and s.thing_id not in mentioned_widely and not topical    # on topic: its states must bear on this input (no rotation through them)
         if s.state_key:
             if own is not None and own[1] == "named":  # a named thing's current values; never reached by meaning alone (they are short labels)
                 scored.append((2.0, s))
+                reasons[s.id] = {"via": "keyed", "thing": t.name}
             continue
+        shared_words = sorted(asked & state_terms.get(s.id, set()))[:4]
+        base = {"cos": round(raw, 3) if raw is not None else None, **({"weight": weights[s.id]} if s.id in weights else {})}
         if s.id in news and own is not None:
             scored.append((1.5, s))                                  # changed since this thing was last shown, and named again: that is news
+            reasons[s.id] = {"via": "news", "thing": t.name, **base}
         elif specific:
             scored.append((1.0 + (c or 0.0) / 10, s))
+            reasons[s.id] = {**why_named(own), "specific": True, **base}
         elif c is not None and c >= floor:
             scored.append((c, s))
+            reasons[s.id] = {"via": "meaning", **base, **({"words": shared_words} if shared_words else {})}
         elif c is not None and own is not None and topical and c >= floor - TOPIC_SLACK:
             scored.append((c, s))                                    # the thing we are talking about, named again
+            reasons[s.id] = {"via": "topic", "thing": t.name, "named": True, **base}
         elif c is not None and own is None and topical and c >= floor - TOPIC_NEAR:
             scored.append((c, s))                                    # the thing we are talking about, not named this time
+            reasons[s.id] = {"via": "topic", "thing": t.name, "named": False, **base}
         elif c is not None and hit is not None and c >= floor - NAMED_SLACK and shared >= 1:
             scored.append((c, s))
+            reasons[s.id] = {**why_named(hit), "generic": True, **base, "words": shared_words}
         elif c is not None and shared >= 2 and c >= floor - WORD_SLACK - WORD_STEP * min(shared - 2, 1):
             scored.append((c, s))
+            reasons[s.id] = {"via": "words", **base, "words": shared_words}
         elif c is None and hit is not None and shared >= 2:          # meaning is down: a named generic thing still needs the input's own words
             scored.append((0.5 + shared / 100, s))
+            reasons[s.id] = {**why_named(hit), "generic": True, **base, "words": shared_words}
     scored.sort(key=lambda x: (-x[0], x[1].id))
     # newer facts about the same subject replace older ones at injection time
     by_thing: dict[int, list[State]] = {}
@@ -339,7 +390,38 @@ def select(store: Store, text: str, embedder: Optional[Embedder], *, floor: floa
             it.states = it.states[:max(1, max_states - shown_states)]
         shown_states += sum(1 for x in it.states if not x.state_key) + (1 if any(x.state_key for x in it.states) else 0)   # a thing's keyed values are one line
         shown.append(it)
+    if info is not None:
+        info["reasons"] = {s.id: reasons.get(s.id, {}) for it in shown + dropped for s in it.states}
     return shown, [s for _, s in kept], dropped
+
+
+def reason_tag(r: dict) -> str:
+    """A compact "how connected" tag for the injected line, only where the connection is not obvious from the line itself (a name it carries)."""
+    if r.get("via") in ("meaning", "words", "topic") and r.get("cos") is not None:
+        return f"~{r['cos']:.2f}" + (" topic" if r["via"] == "topic" else "")
+    if r.get("generic"):
+        return f"via {r.get('thing')}"
+    return ""
+
+
+def explain(r: dict) -> str:
+    """The full reason as a sentence (tools/explain.py)."""
+    if not r:
+        return "no reason recorded (logged before reasons were kept)"
+    via, thing = r.get("via"), r.get("thing")
+    cos = f"meaning {r['cos']:.2f} to the input" if r.get("cos") is not None else "no meaning score (embeddings were down)"
+    words_ = f"; shared rare words: {', '.join(r['words'])}" if r.get("words") else ""
+    weight = f"; usefulness weight {r['weight']}" if "weight" in r else ""
+    text = {"keyed": f"a live keyed value of {thing!r}, which the input names",
+            "news": f"changed since {thing!r} was last shown, and the input names it again",
+            "meaning": f"close in meaning ({cos})",
+            "words": f"shares rare words with the input and is nearly close enough in meaning ({cos})",
+            "topic": f"{thing!r} is the conversation's current topic" + (" and the input names it" if r.get("named") else "") + f" ({cos})"}.get(via)
+    if text is None:
+        kind = "a near spelling of" if via == "spelled" else "the name"
+        text = (f"the input contains {kind} {thing!r}" + (", a specific thing (few states)" if r.get("specific") else "")
+                + (f", a generic name, so it also needed meaning ({cos})" if r.get("generic") else ""))
+    return text + words_ + weight
 
 
 def _pointer(ev: list[Evidence]) -> str:
@@ -422,7 +504,8 @@ def surface(store: Store, text: str, embedder: Optional[Embedder] = None, *, flo
             rel = f" -> {s.object_name}" if s.object_name else ""
             label = f"{s.state_key}: " if s.state_key else ""
             ptr = _pointer(ev.get(s.id, []))
-            chunk.append(f"  #{s.id} {label}{_first_line(s.text, 200)}{rel} [{_freshness(s, today)}{' · ' + ptr if ptr else ''}]")
+            tag = reason_tag(info.get("reasons", {}).get(s.id, {}))
+            chunk.append(f"  #{s.id} {label}{_first_line(s.text, 200)}{rel} [{_freshness(s, today)}{' · ' + ptr if ptr else ''}{' · ' + tag if tag else ''}]")
         block = "\n".join(chunk)
         if sum(len(x) + 1 for x in lines) + len(block) > budget:
             omitted.append(item.thing.name)
@@ -437,7 +520,8 @@ def surface(store: Store, text: str, embedder: Optional[Embedder] = None, *, flo
     if log_turn:
         for item in shown:
             for s in item.states:
-                store.log_outcome(s.id, "surfaced", source="surface", turn_ref=log_turn, detail=json.dumps({"why": item.why, "status": s.status, "trust": s.trust}))
+                store.log_outcome(s.id, "surfaced", source="surface", turn_ref=log_turn,
+                                  detail=json.dumps({"why": item.why, "status": s.status, "trust": s.trust, "reason": info.get("reasons", {}).get(s.id, {})}))
         for sid in agent_ids:
             st = store.get_state(sid)
             store.log_outcome(sid, "surfaced", source="surface", turn_ref=log_turn, detail=json.dumps({"why": "agents line", "status": st.status if st else None, "trust": st.trust if st else None}))

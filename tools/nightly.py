@@ -104,6 +104,8 @@ def main() -> int:
         from statekeeper.usefulness import summary
         h["usefulness"] = summary(SqliteStore(db), days=1)
         h["open_flags"] = len(SqliteStore(db).open_flags())
+        from statekeeper.usefulness import weak_connections
+        h["weak_connections"] = weak_connections(SqliteStore(db), days=7)
         d = home / "reports"
         d.mkdir(parents=True, exist_ok=True)
         text = health_text(h)

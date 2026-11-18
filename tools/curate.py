@@ -4,6 +4,9 @@
     python tools/curate.py [--db PATH] show <id>                              one state with its evidence and resolution
     python tools/curate.py [--db PATH] close <id> --reason "..." [--replaced-by N]
     python tools/curate.py [--db PATH] reopen <id> --reason "..."
+    python tools/curate.py [--db PATH] unlink <id> <thing> --reason "..." [--match any|name]    (chat: "sk #<id> not <thing>")
+    python tools/curate.py [--db PATH] unlink <id> "<words>" --concept --reason "..."   |   unlink <id> --match meaning --reason "..."
+    python tools/curate.py [--db PATH] unlink thing:<A> <B> --reason "..."    |   relink <unlink id> --reason "..."   |   unlinks
     python tools/curate.py [--db PATH] feedback <id> useful|wrong|stale|noise [--note "..."]   (also typed in chat as "sk #<id> wrong")
     python tools/curate.py [--db PATH] add <thing> "<text>" --evidence-type T --evidence-ref R [--excerpt E] [--trust owner|verified|derived]
                                        [--kind belief|rule] [--volatility work|stable|rule] [--thing-kind thing|person|agent] [--replaces N] [--object THING]
@@ -47,6 +50,17 @@ def main() -> int:
     fb.add_argument("id", type=int)
     fb.add_argument("verdict", choices=("useful", "wrong", "stale", "noise"))
     fb.add_argument("--note", default="")
+    ul = sub.add_parser("unlink", help="a negative link: 'these may look related but they are not' (never deletes; relink ends it)")
+    ul.add_argument("state", help="a state id, or 'thing:<name>' to unlink two things")
+    ul.add_argument("target", nargs="?", default=None, help="the thing it is not about (or with --concept, words)")
+    ul.add_argument("--concept", action="store_true", help="target is a concept (words), not a thing")
+    ul.add_argument("--match", default="any", choices=("any", "name", "meaning"),
+                    help="any: never shown when the target is named/on topic; name: only the name connection is cut; meaning (no target): only its own name brings it")
+    ul.add_argument("--reason", required=True)
+    rl = sub.add_parser("relink")
+    rl.add_argument("unlink_id", type=int)
+    rl.add_argument("--reason", required=True)
+    sub.add_parser("unlinks", help="list active negative links")
     a = sub.add_parser("add")
     a.add_argument("thing")
     a.add_argument("text")
@@ -77,12 +91,31 @@ def main() -> int:
             print(f"  standing={s.standing} superseded_by={s.superseded_by} resolution={s.resolution}")
             for e in store.evidence_of([s.id]).get(s.id, []):
                 print(f"  evidence {e.ref_type} {e.ref}: {(e.excerpt or '')[:120]}")
+            for un in store.unlinks(state_id=s.id):
+                print(f"  negative link {un.id}: not {store.get(un.thing_id).name if un.thing_id else un.concept or 'by meaning'} [{un.match}]: {un.reason}")
         elif args.cmd == "close":
             print(line(store.close_state(args.id, args.reason, replaced_by=args.replaced_by, actor=args.actor)))
         elif args.cmd == "feedback":
             from statekeeper.usefulness import log_feedback, parse_feedback
             n = log_feedback(store, parse_feedback(f"sk #{args.id} {args.verdict}"), source="feedback:curate", note=args.note)
             print(f"recorded {args.verdict} for #{args.id}" if n else f"no state #{args.id}")
+        elif args.cmd == "unlink":
+            if args.state.startswith("thing:"):
+                uid = store.unlink(None, thing=args.state[6:], other_thing=args.target, reason=args.reason, actor=args.actor)
+            elif args.concept:
+                uid = store.unlink(int(args.state.lstrip("#")), concept=args.target, match=args.match, reason=args.reason, actor=args.actor)
+            else:
+                uid = store.unlink(int(args.state.lstrip("#")), thing=args.target, match=args.match, reason=args.reason, actor=args.actor)
+            print(f"unlink {uid} recorded")
+        elif args.cmd == "relink":
+            store.relink(args.unlink_id, args.reason, actor=args.actor)
+            print(f"unlink {args.unlink_id} ended")
+        elif args.cmd == "unlinks":
+            for un in store.unlinks():
+                a_ = store.get(un.thing_id).name if un.thing_id else None
+                b_ = store.get(un.other_thing_id).name if un.other_thing_id else None
+                what = f"things {a_!r} <-/-> {b_!r}" if un.state_id is None else f"#{un.state_id} not " + (f"thing {a_!r}" if a_ else f"concept {un.concept!r}" if un.concept else "by meaning")
+                print(f"{un.id}: {what} [{un.match}] by {un.actor} {un.created_utc[:16]}: {un.reason}")
         elif args.cmd == "reopen":
             print(line(store.reopen(args.id, args.reason, actor=args.actor)))
         elif args.cmd == "add":

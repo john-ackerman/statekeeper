@@ -167,3 +167,59 @@ def summary(store: Store, days: float = 1) -> dict:
     return {"shown": shown, "used": used, "used_pct": round(100 * used / shown) if shown else 0,
             "contradicted": sum(x["contradicted"] for x in c.values()), "explicit_feedback": sum(x["contradicted_explicit"] + x["unhelpful"] for x in c.values()),
             "shown_most_unused": [f"#{sid} x{n}" for n, sid in unused]}
+
+
+_UNLINK = re.compile(r"\b(?:statekeeper|sk)\s*[:,]?\s*#(\d+)\s+(?:is\s+)?not\s+(?:about\s+|related\s+to\s+|for\s+)?[\"']?([^\n.;,!?\"']{2,60})", re.I)
+
+
+def parse_unlinks(text: str) -> list[tuple[int, str]]:
+    """'sk #395 not TheRepo', 'statekeeper: #12 is not about the datepicker' -> [(state_id, target)]. The target is a thing's name, or else a
+    concept (a few words). "sk #12 not useful" is feedback, not an unlink."""
+    out = []
+    for m in _UNLINK.finditer(text):
+        target = " ".join(m.group(2).split())
+        if target.lower() in _VERDICT or target.lower().startswith(("useful", "helpful", "relevant", "right")):
+            continue
+        out.append((int(m.group(1)), target))
+    return out
+
+
+def apply_unlinks(store: Store, items: list[tuple[int, str]], *, actor: str, reason: str) -> list[int]:
+    """Records each as a negative link: from the named thing when the target is one (trying without a leading "the"), else from the concept."""
+    made = []
+    for sid, target in items:
+        if store.get_state(sid) is None:
+            continue
+        name = next((n for n in (target, re.sub(r"^(the|a|an)\s+", "", target, flags=re.I)) if store.find(n)), None)
+        try:
+            made.append(store.unlink(sid, thing=name, reason=reason, actor=actor) if name else store.unlink(sid, concept=target, reason=reason, actor=actor))
+        except Exception:
+            continue
+    return made
+
+
+def weak_connections(store: Store, days: float = 7, floor: float = 0.78, min_turns: int = 3) -> list[dict]:
+    """The relatedness audit: states shown in at least `min_turns` turns where the recorded connection was weak (a generic name, rare words, topic
+    carry-over, or meaning within 0.03 of the floor), with how often they were used. Candidates for a negative link; nothing is applied."""
+    since = _since(days)
+    per: dict[int, dict] = {}
+    for o in store.outcomes():
+        if o.state_id is None or (o.recorded_utc or "")[:19] < since or o.kind not in ("surfaced", "used"):
+            continue
+        c = per.setdefault(o.state_id, {"turns": set(), "weak": 0, "used": 0, "how": {}})
+        if o.kind == "used":
+            c["used"] += 1
+            continue
+        c["turns"].add(o.turn_ref)
+        try:
+            r = (json.loads(o.detail or "{}") or {}).get("reason") or {}
+        except ValueError:
+            r = {}
+        weak = r.get("generic") or r.get("via") in ("words", "topic") or (r.get("via") == "meaning" and (r.get("cos") or 1) < floor + 0.03)
+        if weak:
+            c["weak"] += 1
+            key = r.get("thing") or r.get("via")
+            c["how"][key] = c["how"].get(key, 0) + 1
+    rows = [{"state": sid, "turns": len(c["turns"]), "weak": c["weak"], "used": c["used"], "via": max(c["how"], key=c["how"].get) if c["how"] else None}
+            for sid, c in per.items() if len(c["turns"]) >= min_turns and c["weak"] >= min_turns and c["used"] == 0]
+    return sorted(rows, key=lambda r: -r["weak"])[:10]

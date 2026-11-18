@@ -196,6 +196,7 @@ def prompt_context(event: dict, store, embedder, state: dict, state_file: Path, 
     else:
         # what the person says about what was shown: explicit "sk #123 wrong", or a correction that points at a state shown on the last turn
         feedback = usefulness.log_feedback(store, usefulness.parse_feedback(prompt), source="feedback:prompt", turn_ref=turn_ref, note=prompt)
+        feedback += len(usefulness.apply_unlinks(store, usefulness.parse_unlinks(prompt), actor="person:chat", reason=f"said in chat: {prompt[:160]}"))
         last = recent[-1]["states"] if recent else []
         for sid in usefulness.corrected(store, prompt, last):
             store.log_outcome(sid, "contradicted", source="user-correction", turn_ref=turn_ref, detail=json.dumps({"prompt": prompt[:200]}))

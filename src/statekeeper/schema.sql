@@ -78,6 +78,42 @@ CREATE TABLE IF NOT EXISTS evidence (
 );
 CREATE INDEX IF NOT EXISTS idx_evidence_ref ON evidence(ref_type, ref);
 
+-- Negative links: a person saying "these may look related but they are not". Selection honours the active ones; nothing is deleted (a relink
+-- sets removed_utc), and every change is an event. Shapes: (state, thing) a state never connects through that thing; (state, concept) a state
+-- never surfaces for inputs about that concept; (state, match='meaning') a state surfaces only through its own name, never by meaning or words;
+-- (thing, other_thing) two things never connect each other's states.
+CREATE TABLE IF NOT EXISTS unlinks (
+    id INTEGER PRIMARY KEY,
+    state_id INTEGER NULL REFERENCES states(id),
+    thing_id INTEGER NULL REFERENCES things(id),
+    other_thing_id INTEGER NULL REFERENCES things(id),
+    concept TEXT NULL,
+    match TEXT NOT NULL DEFAULT 'any',            -- any | name | meaning
+    actor TEXT NOT NULL,
+    reason TEXT NOT NULL,
+    created_utc TEXT NOT NULL,
+    removed_utc TEXT NULL,
+    removed_reason TEXT NULL,
+    CHECK (match IN ('any', 'name', 'meaning'))
+);
+CREATE INDEX IF NOT EXISTS idx_unlinks_state ON unlinks(state_id) WHERE state_id IS NOT NULL;
+
+CREATE TRIGGER IF NOT EXISTS unlinks_event_added AFTER INSERT ON unlinks
+BEGIN
+    INSERT INTO events (event_type, thing_id, state_id, actor, payload, recorded_utc)
+    VALUES ('unlinked', NEW.thing_id, NEW.state_id, NEW.actor,
+            json_object('unlink', NEW.id, 'other_thing', NEW.other_thing_id, 'concept', NEW.concept, 'match', NEW.match, 'reason', NEW.reason),
+            strftime('%Y-%m-%d %H:%M:%f+00:00', 'now'));
+END;
+
+CREATE TRIGGER IF NOT EXISTS unlinks_event_removed AFTER UPDATE OF removed_utc ON unlinks
+WHEN OLD.removed_utc IS NULL AND NEW.removed_utc IS NOT NULL
+BEGIN
+    INSERT INTO events (event_type, thing_id, state_id, actor, payload, recorded_utc)
+    VALUES ('relinked', NEW.thing_id, NEW.state_id, COALESCE((SELECT actor FROM event_context WHERE id = 1), 'store'),
+            json_object('unlink', NEW.id, 'reason', NEW.removed_reason), strftime('%Y-%m-%d %H:%M:%f+00:00', 'now'));
+END;
+
 CREATE TABLE IF NOT EXISTS flags (
     id INTEGER PRIMARY KEY,
     state_id INTEGER NOT NULL REFERENCES states(id),

@@ -99,6 +99,20 @@ WEIGHT_PREFIX = "weight.state."   # per-state usefulness weights live in param_h
 
 
 @dataclass(frozen=True)
+class Unlink:
+    id: int
+    state_id: Optional[int]
+    thing_id: Optional[int]
+    other_thing_id: Optional[int]
+    concept: Optional[str]
+    match: str
+    actor: str
+    reason: str
+    created_utc: str
+    removed_utc: Optional[str]
+
+
+@dataclass(frozen=True)
 class Outcome:
     id: int
     state_id: Optional[int]
@@ -143,6 +157,10 @@ class Store(Protocol):
     def set_param(self, name: str, value: float, reason: str, *, actor: str) -> None: ...
     def get_param(self, name: str, default: float) -> float: ...
     def state_weights(self) -> dict[int, float]: ...
+    def unlink(self, state_id: int | None, *, thing: str | None = None, other_thing: str | None = None, concept: str | None = None,
+               match: str = "any", reason: str, actor: str) -> int: ...
+    def relink(self, unlink_id: int, reason: str, *, actor: str) -> None: ...
+    def unlinks(self, *, active: bool = True, state_id: int | None = None) -> list[Unlink]: ...
     def revert_param(self, name: str, *, actor: str) -> float: ...
     def param_history(self, name: str) -> list[tuple[int, float, str, str]]: ...
     def add_evidence(self, state_id: int, evidence: Evidence, *, actor: str) -> None: ...
@@ -533,6 +551,49 @@ class SqliteStore:
         """Every per-state usefulness weight in force (1.0 when none was ever set)."""
         rows = self.db.execute("SELECT name, value FROM param_history WHERE id IN (SELECT MAX(id) FROM param_history WHERE name LIKE 'weight.state.%' GROUP BY name)")
         return {int(n[len(WEIGHT_PREFIX):]): v for n, v in rows if n[len(WEIGHT_PREFIX):].isdigit()}
+
+    # ---- negative links ("these may look related but they are not") ----
+    def unlink(self, state_id, *, thing=None, other_thing=None, concept=None, match="any", reason, actor) -> int:
+        """Records a negative link and returns its id. One of: (state, thing): the state never connects through that thing (match "any": not shown
+        at all when the input names it or it is on topic; "name": only the name/topic connection is cut, meaning may still bring it); (state,
+        concept): not shown for inputs about that concept; (state, match="meaning"): shown only through its own name; (thing, other_thing): the
+        two never connect each other's states. Never deletes anything; `relink` ends it."""
+        if not reason or not reason.strip():
+            raise StoreError("an unlink needs its reason")
+        if match not in ("any", "name", "meaning"):
+            raise StoreError("match must be any, name or meaning")
+        ids = {}
+        for key, name in (("thing", thing), ("other", other_thing)):
+            if name is not None:
+                tt = self.find(name)
+                if tt is None:
+                    raise StoreError(f"no thing named {name!r}")
+                ids[key] = tt.id
+        if state_id is not None:
+            if self.get_state(state_id) is None:
+                raise StoreError(f"no state #{state_id}")
+            if other_thing is not None or sum(x is not None for x in (thing, concept)) > 1 or (thing is None and concept is None and match != "meaning"):
+                raise StoreError("a state is unlinked from one thing, one concept, or (match=meaning) from meaning matches")
+        elif not (thing and other_thing) or concept is not None:
+            raise StoreError("without a state, unlink two things")
+        concept = " ".join(concept.split()) if concept else None
+        with self._tx(actor) as db:
+            return db.execute("INSERT INTO unlinks (state_id, thing_id, other_thing_id, concept, match, actor, reason, created_utc) VALUES (?,?,?,?,?,?,?,?)",
+                              (state_id, ids.get("thing"), ids.get("other"), concept, match, actor, reason.strip(), now())).lastrowid
+
+    def relink(self, unlink_id, reason, *, actor) -> None:
+        if not reason or not reason.strip():
+            raise StoreError("a relink needs its reason")
+        row = self.db.execute("SELECT removed_utc FROM unlinks WHERE id = ?", (unlink_id,)).fetchone()
+        if row is None or row[0] is not None:
+            raise StoreError(f"unlink {unlink_id} is not active")
+        with self._tx(actor) as db:
+            db.execute("UPDATE unlinks SET removed_utc = ?, removed_reason = ? WHERE id = ?", (now(), reason.strip(), unlink_id))
+
+    def unlinks(self, *, active=True, state_id=None) -> list[Unlink]:
+        rows = self.db.execute("SELECT id, state_id, thing_id, other_thing_id, concept, match, actor, reason, created_utc, removed_utc FROM unlinks "
+                               "WHERE (? = 0 OR removed_utc IS NULL) AND (? IS NULL OR state_id = ?) ORDER BY id", (1 if active else 0, state_id, state_id))
+        return [Unlink(*r) for r in rows]
 
     def revert_param(self, name, *, actor) -> float:
         row = self.db.execute("SELECT previous FROM param_history WHERE name = ? ORDER BY id DESC LIMIT 1", (name,)).fetchone()

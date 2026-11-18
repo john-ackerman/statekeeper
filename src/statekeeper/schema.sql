@@ -350,3 +350,16 @@ CREATE TABLE IF NOT EXISTS shadow_injections (
     CHECK (source IN ('legacy', 'statekeeper'))
 );
 CREATE INDEX IF NOT EXISTS idx_shadow_inj_turn ON shadow_injections(turn_ref);
+
+-- Requests a state answers: short things a person says when they need it ("is there a script to sign the agent into QA?"), written once per durable
+-- or how-to state by a model, embedded as owner_type 'question'. A prompt is matched against these as well as against the state's own text: a weak
+-- embedding model matches a request to a request far better than a request to a statement of fact. Never shown; evidence for retrieval only.
+CREATE TABLE IF NOT EXISTS state_questions (
+    id INTEGER PRIMARY KEY,
+    state_id INTEGER NOT NULL REFERENCES states(id),
+    text TEXT NOT NULL,
+    writer TEXT NOT NULL,
+    created_utc TEXT NOT NULL,
+    UNIQUE (state_id, text)
+);
+CREATE INDEX IF NOT EXISTS idx_state_questions_state ON state_questions(state_id);

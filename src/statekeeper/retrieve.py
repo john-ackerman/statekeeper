@@ -161,6 +161,60 @@ CONCEPT_SIM = 0.80       # an input this close in meaning to an unlinked concept
 WEIGHT_SPAN = 0.10       # a usefulness weight w moves a state's meaning score by (w - 1) * WEIGHT_SPAN (w is kept in 0.5..1.1, so -0.05..+0.01)
 
 
+SEG_PENALTY = float(__import__("os").environ.get("STATEKEEPER_SEG_PENALTY", "0.03"))   # a clause's match counts this much less than the whole input's
+SEG_MAX = 8              # at most this many clauses are embedded besides the whole input
+SEG_MIN_WORDS = 5        # a clause shorter than this is joined to the next ("Oh yeah." is not a question)
+_CLAUSE = re.compile(r"(?<=[.?!;])\s+|\n+")
+_HOWTO_TEXT = re.compile(r"`[^`]+`|\b\w+\.(mjs|js|py|ps1|sh|bat|cmd|exe)\b|\s--[a-z]|\b[A-Z]:[/\\]|\b(run|use|via|with|through|query|queried)\b .{0,40}\b(cli|script|tool|skill|command|mcp)\b|"
+                        r"\b(cli|script|tool|skill|command)\b", re.I)
+
+
+Q_FLOOR = float(__import__("os").environ.get("STATEKEEPER_Q_FLOOR", "0.82"))   # a request the state answers this close to the input (or a clause) qualifies it
+
+
+def _unit(v: list) -> list:
+    n = sum(x * x for x in v) ** 0.5 or 1.0
+    return [x / n for x in v]
+
+
+def _dot(a: list, b: list) -> float:
+    from operator import mul
+    return sum(map(mul, a, b))
+
+
+def segments(text: str) -> list[str]:
+    """The input's clauses (sentences), short ones joined to the next, longest first, at most SEG_MAX. A long dictated prompt is about several
+    things at once; a state relevant to one clause is far from the whole prompt in meaning but close to that clause."""
+    parts = [p.strip() for p in _CLAUSE.split(text[-QUERY_CHARS * 2:]) if p.strip()]
+    out: list[str] = []
+    buf = ""
+    for p in parts:
+        buf = f"{buf} {p}".strip()
+        if len(buf.split()) >= SEG_MIN_WORDS:
+            out.append(buf)
+            buf = ""
+    if buf and out:
+        out[-1] = f"{out[-1]} {buf}"
+    elif buf:
+        out.append(buf)
+    if len(out) <= 1:
+        return []                       # one clause: the whole input already is it
+    return sorted(out, key=lambda x: -len(x))[:SEG_MAX]
+
+
+def is_howto(s: State) -> bool:
+    """A state that says how to do something: a standing rule or durable fact, or one that names a command, script, path or tool."""
+    return s.kind == "rule" or s.volatility in ("stable", "rule") or bool(_HOWTO_TEXT.search(s.text))
+
+
+def embed_text(s: State, aliases: Optional[dict[int, list[str]]] = None) -> str:
+    """What a state's vector is made from: its thing, what it is about (the object), the thing's other names, and its text. The object and the
+    aliases matter when the subject is a person or an agent ("Jane fills .env.local for login-tool")."""
+    head = s.thing_name + (f" / {s.object_name}" if s.object_name else "")
+    also = (aliases or {}).get(s.thing_id, []) + (aliases or {}).get(s.object_id, []) if aliases else []
+    return (f"{head}" + (f" ({', '.join(also[:4])})" if also else "") + f": {s.text}")[:400]
+
+
 _PR_URL = re.compile(r"https?://github\.com/[^/\s]+/([^/\s]+)/pull/(\d+)\S*")
 
 
@@ -236,18 +290,41 @@ def select(store: Store, text: str, embedder: Optional[Embedder], *, floor: floa
             mentioned_widely.add(tid)
     query = None
     cos: dict[int, float] = {}
+    qcos: dict[int, float] = {}
     vec: dict[int, list] = {}
     if embedder is not None and text.strip():
         from .embed import ensure_vectors
         try:
             ensure_vectors(store, embedder, limit=64)
-            query = embedder.embed([split_identifiers(text[-QUERY_CHARS:])])[0]
+            segs = segments(text)
+            vecs = embedder.embed([split_identifiers(text[-QUERY_CHARS:])] + [split_identifiers(x) for x in segs])
+            query, seg_vecs = vecs[0], vecs[1:]
         except Exception:
-            query = None
+            query, seg_vecs = None, []
         if query is not None:
+            qu, su = _unit(query), [_unit(q) for q in seg_vecs]
             for v in store.vectors("state", embedder.model):
                 vec[v["owner_id"]] = v["vector"]
-                cos[v["owner_id"]] = cosine(query, v["vector"])
+                u = _unit(v["vector"])
+                c0 = _dot(qu, u)
+                if su:
+                    c0 = max(c0, max(_dot(q, u) for q in su) - SEG_PENALTY)
+                cos[v["owner_id"]] = c0
+            # requests each durable state answers (questions.py): the best match of any of them to the input or one of its clauses
+            if hasattr(store, "questions"):
+                try:
+                    from .questions import ensure_question_vectors
+                    ensure_question_vectors(store, embedder, limit=32)
+                    owner = {qid: sid for qid, sid, _t in store.questions()}
+                    for v in store.vectors("question", embedder.model):
+                        sid = owner.get(v["owner_id"])
+                        if sid is not None:
+                            u = _unit(v["vector"])
+                            best = max(_dot(q, u) for q in [qu, *su])
+                            if best > qcos.get(sid, 0.0):
+                                qcos[sid] = best
+                except Exception:
+                    qcos.clear()
     # rare words: in at most 1% of standing states (at least 3); the words of names the input matched do not count as shared content
     df: dict[str, int] = {}
     state_terms: dict[int, set[str]] = {}
@@ -331,6 +408,10 @@ def select(store: Store, text: str, embedder: Optional[Embedder], *, floor: floa
         elif c is not None and c >= floor:
             scored.append((c, s))
             reasons[s.id] = {"via": "meaning", **base, **({"words": shared_words} if shared_words else {})}
+        elif s.id not in meaning_off and qcos.get(s.id, 0.0) + (c - raw if c is not None and raw is not None else 0.0) >= Q_FLOOR:
+            qc = qcos[s.id] + (c - raw if c is not None and raw is not None else 0.0)
+            scored.append((qc, s))                                  # the input asks for what this state answers
+            reasons[s.id] = {"via": "asked", **base, "q": round(qcos[s.id], 3)}
         elif c is not None and own is not None and topical and c >= floor - TOPIC_SLACK:
             scored.append((c, s))                                    # the thing we are talking about, named again
             reasons[s.id] = {"via": "topic", "thing": t.name, "named": True, **base}
@@ -397,6 +478,8 @@ def select(store: Store, text: str, embedder: Optional[Embedder], *, floor: floa
 
 def reason_tag(r: dict) -> str:
     """A compact "how connected" tag for the injected line, only where the connection is not obvious from the line itself (a name it carries)."""
+    if r.get("via") == "asked" and r.get("q") is not None:
+        return f"asked ~{r['q']:.2f}"
     if r.get("via") in ("meaning", "words", "topic") and r.get("cos") is not None:
         return f"~{r['cos']:.2f}" + (" topic" if r["via"] == "topic" else "")
     if r.get("generic"):
@@ -415,6 +498,7 @@ def explain(r: dict) -> str:
     text = {"keyed": f"a live keyed value of {thing!r}, which the input names",
             "news": f"changed since {thing!r} was last shown, and the input names it again",
             "meaning": f"close in meaning ({cos})",
+            "asked": f"the input asks for what it answers (best stored request {r.get('q', 0):.2f}; {cos})",
             "words": f"shares rare words with the input and is nearly close enough in meaning ({cos})",
             "topic": f"{thing!r} is the conversation's current topic" + (" and the input names it" if r.get("named") else "") + f" ({cos})"}.get(via)
     if text is None:

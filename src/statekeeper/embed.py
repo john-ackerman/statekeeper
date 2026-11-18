@@ -68,10 +68,16 @@ def ensure_vectors(store, embedder: Embedder, *, limit: int = 100000) -> int:
     """Embeds the states (current ones: pending excluded, rejected and superseded excluded) whose text changed or that have no vector, in batches;
     returns how many were embedded. Content-hashed: an unchanged state costs a hash. Proposed states are included on purpose: most of what is
     learned is a proposal for a long time, and a state that cannot be found by meaning cannot be surfaced."""
+    from .retrieve import embed_text
     have = {(r["owner_id"]): r["content_hash"] for r in store.vectors("state", embedder.model)}
+    aliases: dict[int, list[str]] = {}
+    for tid, label in store.labels():
+        t = store.get(tid)
+        if t is not None and label != t.name:
+            aliases.setdefault(tid, []).append(label)
     todo = []
     for s in store.searchable_states():
-        text = f"{s.thing_name}: {s.text}"[:300]
+        text = embed_text(s, aliases)
         if have.get(s.id) != content_hash(text):
             todo.append((s.id, text))
         if len(todo) >= limit:

@@ -33,8 +33,14 @@ def observe_core(store: Store, fragments: list[dict], note: str | None, *, agent
         mine = [f for f in fragments if f.get("type") == kind_type]
         if not mine:
             continue
-        if not store.find(thing):
-            store.add_thing(thing, "agent" if thing == agent else "person", actor=writer)
+        want = "agent" if thing == agent else "person"
+        t = store.find(thing)
+        if not t:
+            store.add_thing(thing, want, actor=writer)
+        elif t.kind != want and t.kind_confirmed < 1:
+            # made earlier by another writer as a plain thing: the session core shows only people and agents, so a core filed under a
+            # mis-kinded thing would silently never be shown
+            store.set_kind(thing, want, actor=writer)
         obs = {f"core.{f['id']}": _text(f, max_chars) for f in mine}
         r = observe_keyed(store, writer=writer, thing=thing, parent=None, observations=obs,
                           evidence=Evidence("tool", f"{source} core {kind_type}", f"{len(mine)} fragments"), handle=f"{handle_prefix} list --type {kind_type}",

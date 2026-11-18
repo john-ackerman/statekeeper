@@ -83,8 +83,10 @@ def submit_claim(store: Store, claim: dict | str) -> ClaimResult:
     limit = ceiling(writer)
     trust = requested if TRUST_ORDER[requested] <= TRUST_ORDER[limit] else limit
     clamped = requested if trust != requested else None
-    state = store.add_state(claim["thing"].strip(), claim["text"], evidence=evidence, writer=writer, trust=trust, learned_how=learned, session_id=session,
-                            object=claim.get("object"), kind=claim.get("kind", "belief"), state_key=claim.get("state_key"), as_of=claim.get("as_of"),
+    from .rehome import home_of
+    thing, obj = home_of(store, claim["thing"].strip(), claim.get("object"), claim.get("state_key"))   # under the tool/topic, not the speaker
+    state = store.add_state(thing, claim["text"], evidence=evidence, writer=writer, trust=trust, learned_how=learned, session_id=session,
+                            object=obj, kind=claim.get("kind", "belief"), state_key=claim.get("state_key"), as_of=claim.get("as_of"),
                             volatility=claim.get("volatility", "work"), verify_handle=claim.get("verify_handle"), supersedes=claim.get("supersedes"))
     disputed: list[int] = []
     if state.status == "proposed" and state.state_key:

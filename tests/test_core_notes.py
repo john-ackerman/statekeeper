@@ -27,6 +27,21 @@ class CoreNotes(unittest.TestCase):
         again = observe_core(s, FRAGMENTS, "  ")
         self.assertEqual({"core": 2, "changed": 0, "note": False}, again)
 
+    def test_a_person_made_earlier_as_a_plain_thing_is_corrected_so_the_session_core_shows_it(self):
+        from statekeeper.session import session_block
+        s = fresh_store()
+        s.add_thing("Pat", "thing", kind_said=False)
+        observe_core(s, FRAGMENTS, None, agent="Bot", person="Pat")
+        self.assertEqual("person", s.find("Pat").kind)
+        self.assertIn("[Pat] how to ask: Likes numbered questions.", session_block(s))
+
+    def test_a_kind_someone_confirmed_is_left_alone(self):
+        s = fresh_store()
+        s.add_thing("Pat", "thing")
+        s.set_kind("Pat", "thing")
+        observe_core(s, FRAGMENTS, None, agent="Bot", person="Pat")
+        self.assertEqual("thing", s.find("Pat").kind)
+
     def test_a_changed_fragment_is_a_change(self):
         s = fresh_store()
         observe_core(s, FRAGMENTS, None)

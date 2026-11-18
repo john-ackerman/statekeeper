@@ -25,6 +25,7 @@ PROMPT = """You read one message from an agent's working history and write down 
 Rules:
 - A thing is a named person, agent, project, piece of code, ticket, machine or concept that someone would name again. Reuse a name from KNOWN THINGS exactly when the message means the same one.
 - A fact is ONE plain sentence the message states about a subject thing, optionally naming an object thing. Only what the message says, never an inference, no stronger than it says it: keep "may", "planned", "proposed".
+- File a fact under the tool, project, ticket or topic it is about, not under the person or agent who said or did it; name that person or agent as the object. "Jane fills .env.local for login-tool" has thing "login-tool" and object "Jane".
 - claim: "fact" (something said to be so or to have happened), "proposal" (a suggestion, offer, request or plan not said to be carried out; the text must say so), or "instruction" (a one-off order for one session or run; instructions are dropped).
 - kind: "belief" (something that is so), "rule" (how something should always be done), "commitment" (someone said they will do something).
 - is_state: true for a condition that can stop being true (open, deployed, awaiting review); false for an event or lasting trait.

@@ -179,6 +179,8 @@ class Store(Protocol):
     # vectors
     def put_vector(self, owner_type: str, owner_id: int, model: str, vector: Sequence[float], content_hash: str) -> None: ...
     def vectors(self, owner_type: str, model: str) -> list[dict]: ...
+    def add_questions(self, state_id: int, texts: Sequence[str], *, writer: str) -> int: ...
+    def questions(self) -> list[tuple[int, int, str]]: ...
 
 
 _WORD = re.compile(r"[^\W_]{4,}", re.UNICODE)
@@ -690,6 +692,21 @@ class SqliteStore:
         self.db.execute("INSERT INTO embeddings (owner_type, owner_id, model, dims, vector, content_hash, updated_utc) VALUES (?,?,?,?,?,?,?) "
                         "ON CONFLICT(owner_type, owner_id, model) DO UPDATE SET dims=excluded.dims, vector=excluded.vector, content_hash=excluded.content_hash, updated_utc=excluded.updated_utc",
                         (owner_type, owner_id, model, len(vector), to_blob(vector), content_hash, now()))
+
+    def add_questions(self, state_id, texts, *, writer) -> int:
+        """Requests the state answers (see schema: state_questions). Returns how many were new."""
+        n = 0
+        for t in texts:
+            t = " ".join(str(t).split())[:200]
+            if t:
+                n += self.db.execute("INSERT OR IGNORE INTO state_questions (state_id, text, writer, created_utc) VALUES (?,?,?,?)",
+                                     (state_id, t, writer, now())).rowcount
+        return n
+
+    def questions(self) -> list[tuple[int, int, str]]:
+        """(question id, state id, text) for every standing state's questions."""
+        return [tuple(r) for r in self.db.execute("SELECT q.id, q.state_id, q.text FROM state_questions q JOIN states s ON s.id = q.state_id "
+                                                  "WHERE s.superseded_by IS NULL AND s.status IN ('active', 'proposed') ORDER BY q.id")]
 
     def vectors(self, owner_type, model) -> list[dict]:
         from .embed import from_blob

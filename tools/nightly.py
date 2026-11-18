@@ -42,6 +42,7 @@ def main() -> int:
     ap.add_argument("--home", default=str(Path.home() / ".claude" / "statekeeper"))
     ap.add_argument("--skip-import", action="store_true")
     ap.add_argument("--skip-embed", action="store_true")
+    ap.add_argument("--skip-questions", action="store_true", help="do not call the model to write requests for new durable states")
     args = ap.parse_args()
     home = Path(args.home)
     db = home / "shadow.db"
@@ -74,6 +75,26 @@ def main() -> int:
 
     def consolidate():
         return run_pass(SqliteStore(db), HttpEmbedder())
+
+    def skills():
+        """The installed skills (SKILL.md under config skill_dirs) as states: what each does and the CLIs it runs (writers/skills.py)."""
+        from statekeeper import config
+        from statekeeper.writers.skills import observe_skills
+        return observe_skills(SqliteStore(db), config.get_list("skill_dirs"))
+
+    def promote_corroborated():
+        """Proposals corroborated by a second source, a merged duplicate, repeated use or an owner/verified state become active (statekeeper.promote)."""
+        from statekeeper.promote import promote
+        found = promote(SqliteStore(db), HttpEmbedder().model)
+        return {"promoted": len(found), "sample": found[:5]}
+
+    def questions():
+        """Requests each new durable/how-to state answers (statekeeper.questions; one model call per 15 states), then their vectors."""
+        from statekeeper.questions import ensure_question_vectors, generate
+        st = SqliteStore(db)
+        out = generate(st, limit=150)
+        out["embedded"] = ensure_question_vectors(st, HttpEmbedder())
+        return out
 
     def misses():
         return log_misses(SqliteStore(db), HttpEmbedder())
@@ -119,10 +140,14 @@ def main() -> int:
 
     step(log, "backup", backup)
     step(log, "observe-writers", observe)
+    step(log, "skills", skills)
     if not args.skip_import:
         step(log, "reimport-legacy", reimport)
     if not args.skip_embed:
         step(log, "consolidate", consolidate)
+        step(log, "promote-corroborated", promote_corroborated)
+        if not args.skip_questions:
+            step(log, "questions", questions)
         step(log, "misses", misses)
     step(log, "report", report)
     step(log, "usefulness-weights", weights)

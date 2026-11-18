@@ -172,6 +172,9 @@ _HOWTO_TEXT = re.compile(r"`[^`]+`|\b\w+\.(mjs|js|py|ps1|sh|bat|cmd|exe)\b|\s--[
 Q_FLOOR = float(__import__("os").environ.get("STATEKEEPER_Q_FLOOR", "0.84"))   # a request the state answers this close to the input (or a clause) qualifies it
 
 
+Q_MIN_COS = float(__import__("os").environ.get("STATEKEEPER_Q_MIN_COS", "0"))   # ... and the state's own text at least this close
+
+
 def _unit(v: list) -> list:
     n = sum(x * x for x in v) ** 0.5 or 1.0
     return [x / n for x in v]
@@ -408,7 +411,7 @@ def select(store: Store, text: str, embedder: Optional[Embedder], *, floor: floa
         elif c is not None and c >= floor:
             scored.append((c, s))
             reasons[s.id] = {"via": "meaning", **base, **({"words": shared_words} if shared_words else {})}
-        elif s.id not in meaning_off and qcos.get(s.id, 0.0) + (c - raw if c is not None and raw is not None else 0.0) >= Q_FLOOR:
+        elif s.id not in meaning_off and qcos.get(s.id, 0.0) + (c - raw if c is not None and raw is not None else 0.0) >= Q_FLOOR                 and (raw or 0.0) >= Q_MIN_COS:
             qc = qcos[s.id] + (c - raw if c is not None and raw is not None else 0.0)
             scored.append((qc, s))                                  # the input asks for what this state answers
             reasons[s.id] = {"via": "asked", **base, "q": round(qcos[s.id], 3)}

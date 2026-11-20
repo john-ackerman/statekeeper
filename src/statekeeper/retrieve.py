@@ -257,6 +257,18 @@ def _named(store: Store, text: str, exclude_kinds: tuple, exclude_names: tuple, 
     return found
 
 
+_ASK_ABOUT = r"\b(who\W?s|who is|who was|what does|what did|what is|what's|tell me about|remind me (who|about)|about)\s+{name}\b|\b{name}'s\s+(role|job|work|team|area)|\b{name}\s+(again|works? on|does|owns)\b"
+
+
+def asks_about(text: str, name: str) -> bool:
+    """Whether the input asks about a person ("who's Jeremy again", "what does Jen work on", "Adam's role"), by full or first name. Only then does
+    naming a person with few states show what is known about them; otherwise their states need meaning like any generic name."""
+    for n in {name, name.split()[0]}:
+        if re.search(_ASK_ABOUT.format(name=re.escape(n)), text, re.I):
+            return True
+    return False
+
+
 def candidates(store: Store, text: str, embedder: Optional[Embedder], floor: float, limit: int) -> list[Item]:
     """The things `select` would show for an input, best first (for callers that want things, not states)."""
     return select(store, text, embedder, floor=floor, max_things=limit)[0]
@@ -421,7 +433,7 @@ def select(store: Store, text: str, embedder: Optional[Embedder], *, floor: floa
             c = None                                                  # surfaces only through its own name
         why_named = (lambda h: {"via": h[1].split()[0], "thing": h[0].name})
         # naming is enough on its own only for the thing's own states, spelled whole, when the thing is specific
-        specific = own is not None and (own[1] == "named" or own[2] >= CLOSE_SPELLING) and (own_count if t.kind in ("person", "agent") else standing_count).get(s.thing_id, 0) <= SPECIFIC_MAX and s.thing_id not in parents \
+        specific = own is not None and (own[1] == "named" or own[2] >= CLOSE_SPELLING) and (own_count.get(s.thing_id, 0) <= SPECIFIC_MAX and asks_about(text, t.name) if t.kind in ("person", "agent") else standing_count.get(s.thing_id, 0) <= SPECIFIC_MAX) and s.thing_id not in parents \
             and s.thing_id not in mentioned_widely and not topical    # on topic: its states must bear on this input (no rotation through them)
         if s.state_key:
             if own is not None and own[1] == "named":  # a named thing's current values; never reached by meaning alone (they are short labels)

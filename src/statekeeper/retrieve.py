@@ -218,6 +218,7 @@ def embed_text(s: State, aliases: Optional[dict[int, list[str]]] = None) -> str:
     return (f"{head}" + (f" ({', '.join(also[:4])})" if also else "") + f": {s.text}")[:400]
 
 
+INTENTS = __import__("os").environ.get("STATEKEEPER_INTENTS", "1").strip().lower() not in ("0", "off", "false", "no")    # see intents.py
 PEOPLE_BY_NAME = __import__("os").environ.get("STATEKEEPER_PEOPLE_BY_NAME", "1").strip().lower() not in ("0", "off", "false", "no")
 IDENTIFIERS = __import__("os").environ.get("STATEKEEPER_IDENTIFIERS", "1").strip().lower() not in ("0", "off", "false", "no")   # see identifiers.py
 _PR_URL = re.compile(r"https?://github\.com/[^/\s]+/([^/\s]+)/pull/(\d+)\S*")
@@ -243,7 +244,9 @@ def _named(store: Store, text: str, exclude_kinds: tuple, exclude_names: tuple, 
             found[tid] = (thing, f'spelled "{m[1]}"', m[0])
     if ids is not None:
         # a bare PR/ticket/build number ("is 3342 still a draft", "CRM-3150", "build 13801") names every thing that carries it
-        for tid in ids.resolve(text, seq):
+        from .intents import asks_ship
+        ids.resolved = set(ids.resolve(text, seq, common=INTENTS and asks_ship(text)))
+        for tid in ids.resolved:
             if tid in found and found[tid][1] == "named":
                 continue
             thing = store.get(tid)
@@ -344,6 +347,7 @@ def select(store: Store, text: str, embedder: Optional[Embedder], *, floor: floa
         from .identifiers import IdentifierIndex
         ids = IdentifierIndex(store.labels(), [" ".join(words(f"{s.thing_name} {s.text}")) for s in standing_all])
     named = _named(store, text, exclude_kinds, exclude_names, ids)
+    by_number = getattr(ids, "resolved", set()) if ids is not None else set()
     topic = topic or {}
     on_topic = {tid for tid, v in topic.items() if v >= TOPIC_ON}
     weights = store.state_weights() if hasattr(store, "state_weights") else {}
@@ -480,6 +484,8 @@ def select(store: Store, text: str, embedder: Optional[Embedder], *, floor: floa
         # naming is enough on its own only for the thing's own states, spelled whole, when the thing is specific
         specific = own is not None and (own[1] == "named" or own[2] >= CLOSE_SPELLING) and (own_count.get(s.thing_id, 0) <= SPECIFIC_MAX and asks_about(text, t.name) if t.kind in ("person", "agent") else standing_count.get(s.thing_id, 0) <= SPECIFIC_MAX) and s.thing_id not in parents \
             and s.thing_id not in mentioned_widely and not topical    # on topic: its states must bear on this input (no rotation through them)
+        # a PR named by its number: its work notes count as specific too (entity_replaced then keeps only the newest one standing after a merge)
+        specific = specific or (own is not None and s.thing_id in by_number and s.volatility == "work")
         if s.state_key:
             if own is not None and own[1] == "named":  # a named thing's current values; never reached by meaning alone (they are short labels)
                 scored.append((2.0, s))
@@ -521,6 +527,21 @@ def select(store: Store, text: str, embedder: Optional[Embedder], *, floor: floa
             scored.append((1.9, s))                                   # "which PRs are red": the current value it asks about, for every open PR
             reasons[s.id] = {"via": "rollup", "thing": s.thing_name}
             rolled.add(s.thing_id)
+    if INTENTS:
+        from .intents import asks_ship, latest_release, waiting_on_john
+        if asks_ship(text):
+            for s in latest_release(pool):
+                scored.append((1.6, s))                               # "did X ship": what the newest release says, beside X's own state
+                reasons[s.id] = {"via": "release", "thing": s.thing_name}
+        for s in waiting_on_john(pool, text)[:ROLLUP_MAX]:
+            scored.append((1.6, s))                                   # "is anything waiting on me": the recent notes saying so
+            reasons[s.id] = {"via": "waiting", "thing": s.thing_name}
+            rolled.add(s.thing_id)
+    best: dict[int, tuple[float, State]] = {}
+    for score, s in scored:                                           # a state reached two ways keeps its best rank, once
+        if s.id not in best or score > best[s.id][0]:
+            best[s.id] = (score, s)
+    scored = list(best.values())
     scored.sort(key=lambda x: (-x[0], x[1].id))
     # newer facts about the same subject replace older ones at injection time
     by_thing: dict[int, list[State]] = {}
@@ -531,7 +552,7 @@ def select(store: Store, text: str, embedder: Optional[Embedder], *, floor: floa
     if ids is not None:
         # the things that carry one PR number are one subject: notes written before it merged/closed are history, and of its work notes only the newest shows
         from .identifiers import entity_replaced
-        replaced |= entity_replaced(store, ids, [s for _, s in scored])
+        replaced |= entity_replaced(store, ids, [s for _, s in scored], pool)
     for sts in by_thing.values():
         if len(sts) > 1:
             replaced |= set(likely_replaces(sts, store.evidence_of([x.id for x in sts])).values())

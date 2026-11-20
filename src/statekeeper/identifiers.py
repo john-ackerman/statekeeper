@@ -79,6 +79,7 @@ class IdentifierIndex:
             if r and any(len(w) >= MIN_RESIDUE for w in r.split()):
                 phrase_numbers.setdefault(r, set()).add(n)
         self.phrases = {p: next(iter(ns)) for p, ns in phrase_numbers.items() if len(ns) == 1}
+        self.all_phrases = dict(self.phrases)            # common ones too: used when the input asks whether something shipped
         if state_texts is not None:
             padded = [f" {t} " for t in state_texts]
             self.phrases = {p: n for p, n in self.phrases.items() if sum(1 for t in padded if f" {p} " in t) <= RARE_PHRASE}
@@ -93,14 +94,15 @@ class IdentifierIndex:
             return set(got[True])
         return set(got[False]) or set(got[True])
 
-    def resolve(self, text: str, seq: list[str]) -> dict[int, str]:
-        """thing id -> the identifier the input used for it ("3342", or 'sendgrid webhook -> 3342'). `seq` is the input's words, lowercased."""
+    def resolve(self, text: str, seq: list[str], common: bool = False) -> dict[int, str]:
+        """thing id -> the identifier the input used for it ("3342", or 'sendgrid webhook -> 3342'). `seq` is the input's words, lowercased.
+        `common`: also phrases said about many things ("did the datepicker ship": the question is about the one PR named that way)."""
         found: dict[int, str] = {}
         for n, crm in numbers_in_text(text):
             for tid in self.things_for(n, crm):
                 found.setdefault(tid, n)
         joined = f" {' '.join(seq)} "
-        for phrase, n in self.phrases.items():
+        for phrase, n in (self.all_phrases if common else self.phrases).items():
             if f" {phrase} " in joined:
                 for tid in self.things_for(n, False):
                     found.setdefault(tid, f"{phrase} -> {n}")
@@ -115,7 +117,7 @@ def _when(s) -> str:
     return (s.as_of_utc or s.recorded_utc or "").replace("T", " ")[:19]
 
 
-def entity_replaced(store, ids: IdentifierIndex, states: list) -> set[int]:
+def entity_replaced(store, ids: IdentifierIndex, states: list, pool: Optional[list] = None) -> set[int]:
     """States to leave out because a newer fact about the same numbered subject (every thing carrying one PR/build number) exists:
       - a 'work' note recorded before the subject's keyed pr.state became merged or closed (it describes a PR that no longer exists in that form);
       - all but the newest ENTITY_WORK_KEEP of the subject's qualifying 'work' notes.
@@ -150,4 +152,19 @@ def entity_replaced(store, ids: IdentifierIndex, states: list) -> set[int]:
                 live.append(s)
         live.sort(key=lambda s: ((s.as_of_utc or s.recorded_utc or "")[:19].replace("T", " "), s.id), reverse=True)
         out |= {s.id for s in live[ENTITY_WORK_KEEP:]}
+    if pool is not None:
+        # a work note about PRs by number ("the plan puts #3325, #3337 and #3340 in the release"), written before every one of them merged or closed,
+        # is a plan that has since been overtaken, wherever it is filed
+        ended_at: dict[str, str] = {}
+        for k in pool:
+            if k.state_key == "pr.state" and k.text.strip().lower().startswith(TERMINAL):
+                for n, crm in numbers_in_text(k.thing_name):
+                    if not crm:
+                        ended_at[n] = max(ended_at.get(n, ""), _when(k))
+        for s in states:
+            if s.state_key or s.volatility != "work" or s.id in out:
+                continue
+            nums = {n for n, crm in numbers_in_text(s.text) if not crm}
+            if nums and all(n in ended_at for n in nums) and (s.recorded_utc or "").replace("T", " ")[:19] < min(ended_at[n] for n in nums):
+                out.add(s.id)
     return out

@@ -174,6 +174,9 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("thing")
     p.add_argument("alias")
     sub.add_parser("core")
+    p = sub.add_parser("topic", help="what is current under a topic and its sub-areas (no name: the topic index)")
+    p.add_argument("name", nargs="*")
+    p.add_argument("--limit", type=int, default=30)
     p = sub.add_parser("note")
     p.add_argument("--content", default=None)
     args = ap.parse_args(argv)
@@ -231,6 +234,18 @@ def main(argv: list[str] | None = None) -> int:
         elif args.cmd == "alias":
             store.add_alias(args.thing, args.alias, "sk alias", actor=args.actor)
             print(f"'{args.alias}' now names {args.thing}")
+        elif args.cmd == "topic":
+            from statekeeper.topics import topic_index, topic_states
+            if not args.name:
+                print(topic_index(store, top=60, budget=4000) or "no topics yet")
+                return 0
+            t, states = topic_states(store, " ".join(args.name), limit=args.limit)
+            if t is None:
+                print(f"no thing named '{' '.join(args.name)}' (try `sk topic` for the index, or `search`)")
+                return 1
+            print(f"{t.name}: {len(states)} newest standing states under it (sub-areas included)")
+            for s in states:
+                print(_line(s))
         elif args.cmd == "core":
             from statekeeper.session import session_block
             print(session_block(store, budget=100000))

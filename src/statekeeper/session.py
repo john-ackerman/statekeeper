@@ -11,6 +11,7 @@ from .store import Store
 STALE_HOURS = 6
 
 NOTE_THING = "working note"
+TOPIC_INDEX = __import__("os").environ.get("STATEKEEPER_TOPIC_INDEX", "1").strip().lower() not in ("0", "off", "false", "no")
 
 
 def session_block(store: Store, *, budget: int = 9000) -> str:
@@ -24,6 +25,14 @@ def session_block(store: Store, *, budget: int = 9000) -> str:
                 core.append(f"- [{t.name}] {s.text}")
     if core:
         lines += ["Core: what is standing about me and the people I work with.", *core]
+    if TOPIC_INDEX:
+        try:
+            from .topics import topic_index
+            idx = topic_index(store, top=20, budget=600)
+            if idx:
+                lines += ["", idx]
+        except Exception:
+            pass                                           # the index is a convenience: never fail the session start for it
     note = store.find(NOTE_THING)
     if note:
         cur = [s for s in store.states_of(note.id) if s.state_key == "note" and s.status == "active"]

@@ -218,14 +218,16 @@ def embed_text(s: State, aliases: Optional[dict[int, list[str]]] = None) -> str:
     return (f"{head}" + (f" ({', '.join(also[:4])})" if also else "") + f": {s.text}")[:400]
 
 
+IDENTIFIERS = __import__("os").environ.get("STATEKEEPER_IDENTIFIERS", "1").strip().lower() not in ("0", "off", "false", "no")   # see identifiers.py
 _PR_URL = re.compile(r"https?://github\.com/[^/\s]+/([^/\s]+)/pull/(\d+)\S*")
 
 
-def _named(store: Store, text: str, exclude_kinds: tuple, exclude_names: tuple) -> dict[int, tuple[Thing, str, float]]:
+def _named(store: Store, text: str, exclude_kinds: tuple, exclude_names: tuple, ids=None) -> dict[int, tuple[Thing, str, float]]:
     text = _PR_URL.sub(lambda m: f"{m.group(0)} {m.group(1)} PR {m.group(2)}", text)      # a pasted PR link names "<repo> PR <n>"
     seq, split = words(text), words(split_identifiers(text))
     found: dict[int, tuple[Thing, str, float]] = {}
-    for tid, label in store.labels():
+    labels = store.labels()
+    for tid, label in labels:
         thing = store.get(tid)
         if thing is None or thing.retired or thing.kind in exclude_kinds or thing.name.lower() in exclude_names:
             continue
@@ -233,6 +235,15 @@ def _named(store: Store, text: str, exclude_kinds: tuple, exclude_names: tuple) 
             found[tid] = (thing, "named", 1.0)
         elif tid not in found and (m := fuzzy_match(seq, label)):
             found[tid] = (thing, f'spelled "{m[1]}"', m[0])
+    if ids is not None:
+        # a bare PR/ticket/build number ("is 3342 still a draft", "CRM-3150", "build 13801") names every thing that carries it
+        for tid in ids.resolve(text, seq):
+            if tid in found and found[tid][1] == "named":
+                continue
+            thing = store.get(tid)
+            if thing is None or thing.retired or thing.kind in exclude_kinds or thing.name.lower() in exclude_names:
+                continue
+            found[tid] = (thing, "named", 1.0)
     return found
 
 
@@ -260,14 +271,19 @@ def select(store: Store, text: str, embedder: Optional[Embedder], *, floor: floa
     When the conversation moves on the score decays and the word is generic again. Usefulness weights (Store.state_weights, set by the nightly job from outcomes) nudge a state's
     meaning score by at most a few hundredths: a state shown again and again and never used, or said to be noise, needs to be a little closer.
     Returns (items shown, all qualifying states in rank order, items dropped by the caps); `info`, when given, receives the named thing ids."""
-    named = _named(store, text, exclude_kinds, exclude_names)
+    standing_all = store.searchable_states()
+    ids = None
+    if IDENTIFIERS:
+        from .identifiers import IdentifierIndex
+        ids = IdentifierIndex(store.labels(), [" ".join(words(f"{s.thing_name} {s.text}")) for s in standing_all])
+    named = _named(store, text, exclude_kinds, exclude_names, ids)
     topic = topic or {}
     on_topic = {tid for tid, v in topic.items() if v >= TOPIC_ON}
     weights = store.state_weights() if hasattr(store, "state_weights") else {}
     if info is not None:
         info["named"] = [tid for tid, (_t, why, _s) in named.items() if why == "named"]
         info["on_topic"] = sorted(on_topic)
-    pool = [s for s in store.searchable_states() if s.id not in skip_state_ids]
+    pool = [s for s in standing_all if s.id not in skip_state_ids]
     things: dict[int, Optional[Thing]] = {}
 
     def thing_of(tid: int) -> Optional[Thing]:
@@ -437,6 +453,10 @@ def select(store: Store, text: str, embedder: Optional[Embedder], *, floor: floa
         if s.state_key is None:
             by_thing.setdefault(s.thing_id, []).append(s)
     replaced: set[int] = set()
+    if ids is not None:
+        # the things that carry one PR number are one subject: notes written before it merged/closed are history, and of its work notes only the newest shows
+        from .identifiers import entity_replaced
+        replaced |= entity_replaced(store, ids, [s for _, s in scored])
     for sts in by_thing.values():
         if len(sts) > 1:
             replaced |= set(likely_replaces(sts, store.evidence_of([x.id for x in sts])).values())

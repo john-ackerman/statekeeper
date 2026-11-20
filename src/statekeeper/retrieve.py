@@ -577,7 +577,9 @@ def select(store: Store, text: str, embedder: Optional[Embedder], *, floor: floa
         tid = s.thing_id
         if tid not in items:
             hit = named.get(tid)
-            why = hit[1] if hit else f"meaning {score:.2f}"
+            via = reasons.get(s.id, {}).get("via")
+            why = hit[1] if hit else ({"rollup": "asked for this value", "release": "newest release", "waiting": "pending for John"}.get(via)
+                                      or f"meaning {score:.2f}")
             items[tid] = Item(thing_of(tid), why, score, [], s.id)  # type: ignore[arg-type]
             order.append(tid)
         it = items[tid]

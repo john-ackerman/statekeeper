@@ -218,6 +218,7 @@ def embed_text(s: State, aliases: Optional[dict[int, list[str]]] = None) -> str:
     return (f"{head}" + (f" ({', '.join(also[:4])})" if also else "") + f": {s.text}")[:400]
 
 
+PEOPLE_BY_NAME = __import__("os").environ.get("STATEKEEPER_PEOPLE_BY_NAME", "1").strip().lower() not in ("0", "off", "false", "no")
 IDENTIFIERS = __import__("os").environ.get("STATEKEEPER_IDENTIFIERS", "1").strip().lower() not in ("0", "off", "false", "no")   # see identifiers.py
 _PR_URL = re.compile(r"https?://github\.com/[^/\s]+/([^/\s]+)/pull/(\d+)\S*")
 
@@ -227,10 +228,15 @@ def _named(store: Store, text: str, exclude_kinds: tuple, exclude_names: tuple, 
     seq, split = words(text), words(split_identifiers(text))
     found: dict[int, tuple[Thing, str, float]] = {}
     labels = store.labels()
+    # a person or agent can be named too (their standing rules stay out: they are in the session core; what is being done with them may surface)
+    passing = tuple(k for k in exclude_kinds if not (PEOPLE_BY_NAME and k in ("person", "agent")))
+    first_names: dict[str, list[Thing]] = {}
     for tid, label in labels:
         thing = store.get(tid)
-        if thing is None or thing.retired or thing.kind in exclude_kinds or thing.name.lower() in exclude_names:
+        if thing is None or thing.retired or thing.kind in passing or thing.name.lower() in exclude_names:
             continue
+        if PEOPLE_BY_NAME and thing.kind == "person" and len(label.split()) > 1 and label == thing.name:
+            first_names.setdefault(label.split()[0], []).append(thing)
         if occurrences(seq, label) > 0 or (split_identifiers(label) != label and occurrences(split, split_identifiers(label)) > 0):
             found[tid] = (thing, "named", 1.0)
         elif tid not in found and (m := fuzzy_match(seq, label)):
@@ -244,6 +250,10 @@ def _named(store: Store, text: str, exclude_kinds: tuple, exclude_names: tuple, 
             if thing is None or thing.retired or thing.kind in exclude_kinds or thing.name.lower() in exclude_names:
                 continue
             found[tid] = (thing, "named", 1.0)
+    # "Jen" names Jen Gandy when she is the only person by that first name and it is written capitalized, as a name
+    for first, people in first_names.items():
+        if len(people) == 1 and people[0].id not in found and re.search(rf"(?<![\w-]){re.escape(first)}(?![\w-])", text):
+            found[people[0].id] = (people[0], "named", 1.0)
     return found
 
 
@@ -294,7 +304,9 @@ def select(store: Store, text: str, embedder: Optional[Embedder], *, floor: floa
     # how many standing states are about a thing (as subject or object), and whether other things sit under it: a repo or a tool everyone mentions is
     # generic, a ticket or a customer project is specific
     standing_count: dict[int, int] = {}
+    own_count: dict[int, int] = {}
     for s in pool:
+        own_count[s.thing_id] = own_count.get(s.thing_id, 0) + 1
         for tid in {s.thing_id, s.object_id} - {None}:
             standing_count[tid] = standing_count.get(tid, 0) + 1
     parents = {t.parent_id for t in store.things() if t.parent_id is not None}
@@ -409,7 +421,7 @@ def select(store: Store, text: str, embedder: Optional[Embedder], *, floor: floa
             c = None                                                  # surfaces only through its own name
         why_named = (lambda h: {"via": h[1].split()[0], "thing": h[0].name})
         # naming is enough on its own only for the thing's own states, spelled whole, when the thing is specific
-        specific = own is not None and (own[1] == "named" or own[2] >= CLOSE_SPELLING) and standing_count.get(s.thing_id, 0) <= SPECIFIC_MAX and s.thing_id not in parents \
+        specific = own is not None and (own[1] == "named" or own[2] >= CLOSE_SPELLING) and (own_count if t.kind in ("person", "agent") else standing_count).get(s.thing_id, 0) <= SPECIFIC_MAX and s.thing_id not in parents \
             and s.thing_id not in mentioned_widely and not topical    # on topic: its states must bear on this input (no rotation through them)
         if s.state_key:
             if own is not None and own[1] == "named":  # a named thing's current values; never reached by meaning alone (they are short labels)

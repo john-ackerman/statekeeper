@@ -54,5 +54,23 @@ class Surfacing(unittest.TestCase):
         self.assertEqual(sum(1 for t in ("not included", "reviewed twice") if t in out.block), 1)
 
 
+class People(unittest.TestCase):
+    def setUp(self):
+        self.s = fresh_store()
+        self.today = datetime(2026, 11, 20, tzinfo=timezone.utc)
+
+    def add(self, thing, text, **kw):
+        return self.s.add_state(thing, text, evidence=[ev(f"m-{text[:8]}", text)], writer="w", trust="verified", learned_how="read", **kw)
+
+    def test_a_named_person_surfaces_what_is_known_about_their_work_but_not_their_standing_rules(self):
+        self.add("Jen Gandy", "Jen Gandy does integration work primarily.")
+        self.s.set_kind("Jen Gandy", "person")
+        self.add("Jen Gandy", "Jen Gandy always reviews on Fridays.", volatility="rule", kind="rule")
+        out = surface(self.s, "what does Jen work on", None, today=self.today, exclude_kinds=("agent", "person"))
+        self.assertIn("integration work", out.block)
+        self.assertNotIn("Fridays", out.block)                       # standing rules are in the session core already
+        self.assertEqual(surface(self.s, "the jen thing", None, today=self.today, exclude_kinds=("agent", "person")).block, "")   # a name is capitalized
+
+
 if __name__ == "__main__":
     unittest.main()

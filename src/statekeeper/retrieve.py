@@ -260,6 +260,51 @@ def _named(store: Store, text: str, exclude_kinds: tuple, exclude_names: tuple, 
 _ASK_ABOUT = r"\b(who\W?s|who is|who was|what does|what did|what is|what's|tell me about|remind me (who|about)|about)\s+{name}\b|\b{name}'s\s+(role|job|work|team|area)|\b{name}\s+(again|works? on|does|owns)\b"
 
 
+ROLLUP = __import__("os").environ.get("STATEKEEPER_ROLLUP", "1").strip().lower() not in ("0", "off", "false", "no")
+ROLLUP_MAX = 8
+_PRS = re.compile(r"\b(prs|pull requests|which pr|what pr|any pr|all (the |my |our )?pr|open pr|my pr|our pr)s?\b", re.I)
+# what the input asks about -> (keyed relation, how its value starts)
+_ROLLUP_ASKS = [(re.compile(r"\b(red|failing|failed|broken|failures?)\b", re.I), "pr.ci", "ci red"),
+                (re.compile(r"\b(green|passing)\b", re.I), "pr.ci", "ci green"),
+                (re.compile(r"\b(drafts?|still draft)\b", re.I), "pr.state", "draft"),
+                (re.compile(r"\b(approved|approval)\b", re.I), "pr.review", "approved"),
+                (re.compile(r"\b(changes requested)\b", re.I), "pr.review", "changes requested")]
+
+
+def pr_rollup(pool: list[State], text: str) -> list[State]:
+    """For "which PRs are red right now" and the like: the asked-for keyed value of every PR that is still open and still being observed (its
+    pr.state confirmed within LIVE_STALE_HOURS of the newest PR observation, so a PR the observer stopped reading is not listed as current)."""
+    if not _PRS.search(text):
+        return []
+    asks = [(key, start) for rx, key, start in _ROLLUP_ASKS if rx.search(text)]
+    if not asks:
+        return []
+    by_thing: dict[int, dict[str, State]] = {}
+    for s in pool:
+        if s.state_key and s.state_key.startswith("pr."):
+            by_thing.setdefault(s.thing_id, {})[s.state_key] = s
+    seen = [st.confirmed_utc or st.recorded_utc for vals in by_thing.values() for k, st in vals.items() if k == "pr.state"]
+    if not seen:
+        return []
+
+    def at(ts: str) -> datetime:
+        return datetime.fromisoformat(ts[:19].replace(" ", "T")).replace(tzinfo=timezone.utc)
+    newest = max(at(x) for x in seen)
+    out = []
+    for vals in by_thing.values():
+        st = vals.get("pr.state")
+        if st is None or st.text.strip().lower().startswith(("merged", "closed")):
+            continue
+        if (newest - at(st.confirmed_utc or st.recorded_utc)).total_seconds() > LIVE_STALE_HOURS * 3600:
+            continue
+        for key, start in asks:
+            v = vals.get(key)
+            if v is not None and v.text.strip().lower().startswith(start):
+                out.append(v)
+                break
+    return sorted(out, key=lambda s: s.thing_name)
+
+
 def asks_about(text: str, name: str) -> bool:
     """Whether the input asks about a person ("who's Jeremy again", "what does Jen work on", "Adam's role"), by full or first name. Only then does
     naming a person with few states show what is known about them; otherwise their states need meaning like any generic name."""
@@ -470,6 +515,12 @@ def select(store: Store, text: str, embedder: Optional[Embedder], *, floor: floa
         elif c is None and hit is not None and shared >= 2:          # meaning is down: a named generic thing still needs the input's own words
             scored.append((0.5 + shared / 100, s))
             reasons[s.id] = {**why_named(hit), "generic": True, **base, "words": shared_words}
+    rolled: set[int] = set()
+    if ROLLUP and not any(t.kind == "thing" and why == "named" and any(c.isdigit() for c in t.name) for t, why, _s in named.values()):
+        for s in pr_rollup(pool, text):
+            scored.append((1.9, s))                                   # "which PRs are red": the current value it asks about, for every open PR
+            reasons[s.id] = {"via": "rollup", "thing": s.thing_name}
+            rolled.add(s.thing_id)
     scored.sort(key=lambda x: (-x[0], x[1].id))
     # newer facts about the same subject replace older ones at injection time
     by_thing: dict[int, list[State]] = {}
@@ -511,6 +562,12 @@ def select(store: Store, text: str, embedder: Optional[Embedder], *, floor: floa
     shown_states = 0
     for tid in order:
         it = items[tid]
+        if tid in rolled:
+            if sum(1 for x in shown if x.thing.id in rolled) < ROLLUP_MAX:
+                shown.append(it)                                     # a roll-up lists every match, one line each, apart from the caps
+            else:
+                dropped.append(it)
+            continue
         if len(shown) >= max_things or shown_states >= max_states:
             dropped.append(it)
             continue

@@ -19,7 +19,10 @@ PR_CUES = frozenset({"pr", "prs", "pull", "v2", "vw", "virtuousv2", "virtuouswor
 # words that never carry an identifier's subject on their own (the residue of "PR 3342", "Build 7.15.95.13801")
 FILLER = frozenset({"pr", "prs", "pull", "request", "crm", "build", "builds", "ticket", "issue", "run", "and", "the", "of", "for", "v2", "vw",
                     "virtuousv2", "virtuousworkspace", "repo", "branch", "pipeline", "release", "version", "fix", "followup", "follow", "up"})
-MIN_RESIDUE = 5          # a residue phrase needs a word at least this long ("sendgrid") to stand for a number
+COUNT_NOUNS = frozenset("""rows row states records gifts contacts receipts orgs organizations lines tokens chars characters seconds secs ms minutes
+mins hours days weeks files tests items users people emails messages renders errors requests calls bytes kb mb gb words points cases prompts vectors
+threads comments cores replicas batches times percent dollars usd k commits checks""".split())
+MIN_RESIDUE = 5         # a residue phrase needs a word at least this long ("sendgrid") to stand for a number
 RARE_PHRASE = 8          # ... and may appear in at most this many standing states' text
 
 
@@ -40,11 +43,15 @@ def numbers_in_text(text: str) -> list[tuple[str, bool]]:
     """Identifier numbers a text says, with whether 'crm' precedes each ("CRM-3150" is a ticket, "PR 3150" is not). A bare number needs 4+ digits
     and must not look like a year (1990-2039); with '#' or a cue word ("PR 149", "build 13801") 3+ digits are enough."""
     out: list[tuple[str, bool]] = []
-    for w, hashed, prev in _tokens_with_cue(text):
+    toks = _tokens_with_cue(text)
+    for i, (w, hashed, prev) in enumerate(toks):
         if not w.isdigit() or len(w) < 3 or len(w) > 7:
             continue
-        if not (hashed or prev in CUES) and (len(w) < 4 or 1990 <= int(w) <= 2039):
-            continue
+        if not (hashed or prev in CUES):
+            if len(w) < 4 or 1990 <= int(w) <= 2039:
+                continue
+            if i + 1 < len(toks) and toks[i + 1][0] in COUNT_NOUNS:
+                continue                                      # "3000 rows" is a count, not PR 3000
         out.append((w, prev == "crm"))
     return out
 

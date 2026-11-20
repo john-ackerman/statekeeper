@@ -1,5 +1,5 @@
 {
- "_readme": "Retrieval eval cases for Statekeeper recall. Ids refer to the frozen snapshot named in 'snapshot'. expect = list of groups; a group is satisfied when ANY of its state ids is injected, or (if given) any of its regexes matches an injected line. Every group must be satisfied for 'full'; 'hit' = at least one group satisfied. stale = state ids that must NOT be injected for this prompt (still 'active' in the store but contradicted by a newer fact or by reality). channel 'hook' = per-prompt injection; every case also records whether its expected ids are reachable from the SessionStart core block. verified: how the truth was checked (gh = gh pr view at 2026-11-20 ~15:3x UTC; file = path exists on disk; code = read in repo; store = point-in-time store statement only, NOT independently verified; owner = John's own words recorded as owner/verified trust). also_ok = states adjudicated by hand (reading the injected text on the first baseline run) as relevant restatements or partial answers that are not the primary expected state: they count for the lenient metrics and are not noise. Adjudication is mine, not John's; treat the lenient numbers as an upper bound.",
+ "_readme": "Retrieval eval cases for Statekeeper recall. Ids refer to the frozen snapshot named in 'snapshot'. expect = list of groups; a group is satisfied when ANY of its state ids is injected, or (if given) any of its regexes matches an injected line. Every group must be satisfied for 'full'; 'hit' = at least one group satisfied. stale = state ids that must NOT be injected for this prompt (still 'active' in the store but contradicted by a newer fact or by reality). channel 'hook' = per-prompt injection; every case also records whether its expected ids are reachable from the SessionStart core block. verified: how the truth was checked (gh = gh pr view at 2026-11-20 ~15:3x UTC; file = path exists on disk; code = read in repo; store = point-in-time store statement only, NOT independently verified; owner = John's own words recorded as owner/verified trust). also_ok = states adjudicated by hand (reading the injected text on the first baseline run) as relevant restatements or partial answers that are not the primary expected state: they count for the lenient metrics and are not noise. Adjudication is mine, not John's; treat the lenient numbers as an upper bound. Cases with 'added' were added after the baseline (2026-11-20, recall-dev); summary covers the original 55 only, summary_added the added non-guard cases. category 'guard' cases have no expected state: they only check that their 'stale' ids are NOT injected.",
  "snapshot": "snapshots/shadow-20261120-092640.db",
  "cases": [
   {
@@ -912,6 +912,126 @@
    "stale": [],
    "verified": "store: #3526 (2026-11-16 review); PR 3349 is about changing exactly this",
    "note": ""
+  },
+  {
+   "id": "add-phrase-lob-webhook",
+   "category": "live-pr",
+   "prompt": "how is the Lob webhook PR doing",
+   "expect": [
+    [
+     1567,
+     3814,
+     4029
+    ]
+   ],
+   "stale": [],
+   "verified": "store: VirtuousV2 PR 3343 keyed pr.state/ci/review at the snapshot; 'Lob webhook #3343' is the only thing with that phrase",
+   "note": "a PR said by its name instead of its number",
+   "added": "2026-11-20 recall-dev (sk-improve)"
+  },
+  {
+   "id": "add-rollup-drafts",
+   "category": "live-pr",
+   "prompt": "which PRs are still drafts",
+   "expect": [
+    [
+     837,
+     840,
+     854,
+     1190
+    ]
+   ],
+   "stale": [],
+   "verified": "store: the four open pr.state 'draft, open' values observed 15:11 UTC",
+   "note": "roll-up over keyed values",
+   "added": "2026-11-20 recall-dev (sk-improve)"
+  },
+  {
+   "id": "add-ppl-adam",
+   "category": "people",
+   "prompt": "what does Adam do",
+   "expect": [
+    [
+     580
+    ]
+   ],
+   "stale": [],
+   "verified": "store: #580; #278 restates the role (plus an old absence) and is newer, so it can win the same-subject dedupe",
+   "note": "a person asked about by name",
+   "added": "2026-11-20 recall-dev (sk-improve)",
+   "also_ok": [
+    278
+   ]
+  },
+  {
+   "id": "add-waiting-today",
+   "category": "unknown-unknown",
+   "prompt": "what do I need to do today",
+   "expect": [
+    [
+     4022,
+     4023
+    ]
+   ],
+   "stale": [],
+   "verified": "file: C:/repos/work-board/scripts/install-supervisor-task.ps1 exists (same truth as unk-blocked-on-me)",
+   "note": "'needs you' in other words",
+   "added": "2026-11-20 recall-dev (sk-improve)"
+  },
+  {
+   "id": "guard-count-not-pr",
+   "category": "guard",
+   "prompt": "the backfill touched 3000 rows",
+   "expect": [],
+   "stale": [
+    619,
+    620,
+    621,
+    622,
+    623
+   ],
+   "verified": "code: '#3000' is a PR thing; a count must not name it",
+   "note": "guard: identifier resolution must not read counts as PR numbers",
+   "added": "2026-11-20 recall-dev (sk-improve)"
+  },
+  {
+   "id": "guard-year-not-pr",
+   "category": "guard",
+   "prompt": "what did we ship in 2026",
+   "expect": [],
+   "stale": [
+    1151,
+    1152,
+    1411
+   ],
+   "verified": "code: 'VirtuousWorkspace PR 2026' exists; a bare year must not name it",
+   "note": "guard: years are not PR numbers",
+   "added": "2026-11-20 recall-dev (sk-improve)"
+  },
+  {
+   "id": "guard-person-no-ask",
+   "category": "guard",
+   "prompt": "Jeremy said to hold off until Monday",
+   "expect": [],
+   "stale": [
+    35,
+    182
+   ],
+   "verified": "code: naming a person without asking about them must not dump their notes",
+   "note": "guard: person path only on questions about the person",
+   "added": "2026-11-20 recall-dev (sk-improve)"
+  },
+  {
+   "id": "guard-deploy-condition",
+   "category": "guard",
+   "prompt": "what Linear status does a ticket get when the PR is merged but not deployed yet",
+   "expect": [],
+   "stale": [
+    4000
+   ],
+   "verified": "code: a condition about deploying is not a question about the release",
+   "note": "guard: ship intent false positive",
+   "added": "2026-11-20 recall-dev (sk-improve)"
   }
  ]
 }

@@ -294,7 +294,13 @@ def main() -> int:
                     for sid, line in r["lines"].items():
                         mark = "+" if int(sid) in set().union(*[g["ids"] for g in groups_of(c)] or [set()]) else ("!" if int(sid) in c.get("stale", []) else "-")
                         print(f"        {mark} #{sid} {line[:130]}")
-            results[mode] = {"summary": summarize(rows), "by_category": by_category(rows), "rows": rows}
+            added = {c["id"] for c in cases if c.get("added")}
+            guards = {c["id"] for c in cases if c.get("category") == "guard"}
+            orig = [r for r in rows if r["id"] not in added]
+            extra = [r for r in rows if r["id"] in added and r["id"] not in guards]
+            results[mode] = {"summary": summarize(orig), "by_category": by_category(orig), "summary_added": summarize(extra) if extra else {},
+                             "by_category_added": by_category(extra) if extra else {},
+                             "guards": {r["id"]: {"leaked": r["stale_leaked"], "shown": r["shown"]} for r in rows if r["id"] in guards}, "rows": rows}
         out = {"snapshot": str(args.db), "run_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()), "embedding_server": embedder is not None, "case_problems": problems,
                "session_start": session_eval(store, shadow_hook, args.gh, ""), "results": results}
         if args.telemetry:
@@ -303,6 +309,11 @@ def main() -> int:
         for mode, res in results.items():
             print(f"\n== {mode}: {json.dumps(res['summary'])}")
             print(json.dumps(res["by_category"]))
+            if res.get("summary_added"):
+                print(f"== {mode} added cases: hit@all {res['summary_added']['hit@all']} lenient {res['summary_added']['lenient_hit']} "
+                      f"empty {res['summary_added']['empty_rate']} ({res['summary_added']['cases']} cases)")
+            if res.get("guards"):
+                print(f"== {mode} guards: " + ", ".join(f"{k} {'LEAKED ' + str(v['leaked']) if v['leaked'] else 'ok'}" for k, v in res["guards"].items()))
         print("\n== session start:", json.dumps(out["session_start"]))
         print(f"wrote {args.json}")
     finally:

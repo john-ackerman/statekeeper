@@ -12,6 +12,8 @@ class Numbers(unittest.TestCase):
         self.assertEqual([n for n, _ in numbers_in_text("#3342 and build 13801")], ["3342", "13801"])
         self.assertEqual(numbers_in_text("CRM-3150"), [("3150", True)])
         self.assertEqual(numbers_in_text("in 2026 at 15:24 on 2026-11-20 for 500 rows"), [])
+        self.assertEqual(numbers_in_text("the backfill touched 3000 rows"), [])                # a count, not PR 3000
+        self.assertEqual([n for n, _ in numbers_in_text("PR 3000 rows")], ["3000"])             # ... unless it is said to be a PR
         self.assertEqual([n for n, _ in numbers_in_text("SQL-Scripts PR 149")], ["149"])
 
 

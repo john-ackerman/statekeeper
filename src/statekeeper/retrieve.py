@@ -146,6 +146,7 @@ def terms(text: str) -> set[str]:
     return {w for w in set(words(text)) | set(words(split_identifiers(text))) if (len(w) >= 5 or any(c.isdigit() for c in w)) and w not in STOP}
 
 
+VERY_RARE = int(__import__("os").environ.get("STATEKEEPER_VERY_RARE", "5"))   # a word in at most this many states is nearly a name (0 turns the path off)
 SAME_SUBJECT = 0.80      # two qualifying states this close in meaning are about the same subject: only the newer one is shown
 NAMED_SLACK = 0.06       # a generic named thing's state may sit this far under the floor if it also shares a rare word with the input
 WORD_SLACK = 0.08        # any state may sit this far under the floor if it shares two rare words with the input
@@ -238,6 +239,8 @@ def _named(store: Store, text: str, exclude_kinds: tuple, exclude_names: tuple, 
             continue
         if PEOPLE_BY_NAME and thing.kind == "person" and len(label.split()) > 1 and label == thing.name:
             first_names.setdefault(label.split()[0], []).append(thing)
+        if ids is not None and all(w.isdigit() for w in words(label) or ["x"]):
+            continue                                                  # a bare-number name ("#3000") is named only as an identifier (below), never by a count
         if occurrences(seq, label) > 0 or (split_identifiers(label) != label and occurrences(split, split_identifiers(label)) > 0):
             found[tid] = (thing, "named", 1.0)
         elif tid not in found and (m := fuzzy_match(seq, label)):
@@ -517,6 +520,9 @@ def select(store: Store, text: str, embedder: Optional[Embedder], *, floor: floa
             reasons[s.id] = {**why_named(hit), "generic": True, **base, "words": shared_words}
         elif c is not None and shared >= 2 and c >= floor - WORD_SLACK - WORD_STEP * min(shared - 2, 1):
             scored.append((c, s))
+            reasons[s.id] = {"via": "words", **base, "words": shared_words}
+        elif c is not None and VERY_RARE and any(df.get(w, 0) <= VERY_RARE for w in shared_words) and c >= floor - NAMED_SLACK:
+            scored.append((c, s))                                    # one word almost nothing else says ("Eonasdan", "donor"), and nearly close enough
             reasons[s.id] = {"via": "words", **base, "words": shared_words}
         elif c is None and hit is not None and shared >= 2:          # meaning is down: a named generic thing still needs the input's own words
             scored.append((0.5 + shared / 100, s))

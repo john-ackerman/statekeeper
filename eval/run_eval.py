@@ -148,6 +148,29 @@ def make_recall_runner(store, embedder):
     return run
 
 
+def session_state_ids(store) -> set[int]:
+    """Ids of the states whose text the SessionStart block carries WITHOUT the hand-written note (core, topic index, tracked now, what's running):
+    an answer the model already has at session start is not a recall miss. Matched by text (whitespace-normalised), since the block has no ids."""
+    import statekeeper.session as sess
+    was, sess.WITH_NOTE = sess.WITH_NOTE, False
+    try:
+        block = " ".join(sess.session_block(store, budget=16000).split())
+    finally:
+        sess.WITH_NOTE = was
+    return {s.id for s in store.searchable_states() if len(s.text) >= 20 and " ".join(s.text.split())[:200] in block}
+
+
+def add_core_credit(rows: list[dict], cases: list[dict], in_session: set[int]) -> None:
+    """core_hit / core_full: the hook's result OR the expected state already being in the session block. Reported beside, never instead of, the old numbers."""
+    by_id = {c["id"]: c for c in cases}
+    for r in rows:
+        groups = groups_of(by_id[r["id"]])
+        r["in_session_block"] = sorted(set().union(*[g["ids"] for g in groups] or [set()]) & in_session)
+        r["core_hit"] = bool(r["hit@all"] or r["in_session_block"])
+        r["core_full"] = bool(groups) and all(bool(g["ids"] & (set(r["shown"]) | in_session)) or any(p.search(l) for p in g["re"] for l in r["lines"].values())
+                                              for g in groups)
+
+
 def summarize(rows: list[dict]) -> dict:
     def mean(key):
         return round(statistics.mean(r[key] for r in rows), 3) if rows else 0.0
@@ -278,6 +301,7 @@ def main() -> int:
         if args.mode in ("recall", "both"):
             runners["recall"] = make_recall_runner(store, embedder)
         results: dict = {}
+        session_ids = session_state_ids(store)
         for mode, run in runners.items():
             if args.mode != "both" and mode != args.mode:
                 continue
@@ -294,6 +318,7 @@ def main() -> int:
                     for sid, line in r["lines"].items():
                         mark = "+" if int(sid) in set().union(*[g["ids"] for g in groups_of(c)] or [set()]) else ("!" if int(sid) in c.get("stale", []) else "-")
                         print(f"        {mark} #{sid} {line[:130]}")
+            add_core_credit(rows, cases, session_ids)
             added = {c["id"] for c in cases if c.get("added")}
             guards = {c["id"] for c in cases if c.get("category") == "guard"}
             orig = [r for r in rows if r["id"] not in added]
@@ -308,6 +333,12 @@ def main() -> int:
         Path(args.json).write_text(json.dumps(out, indent=1), encoding="utf-8")
         for mode, res in results.items():
             print(f"\n== {mode}: {json.dumps(res['summary'])}")
+            added_ids = {c["id"] for c in cases if c.get("added")}
+            orig_rows = [r for r in res["rows"] if r["id"] not in added_ids]
+            if orig_rows:
+                print(f"== {mode} with credit for facts already in the session block (note off): hit@all {sum(r['core_hit'] for r in orig_rows) / len(orig_rows):.3f} "
+                      f"full {sum(r['core_full'] for r in orig_rows) / len(orig_rows):.3f}; credited beyond the hook: "
+                      f"{[r['id'] for r in orig_rows if r['core_hit'] and not r['hit@all']]}")
             print(json.dumps(res["by_category"]))
             if res.get("summary_added"):
                 print(f"== {mode} added cases: hit@all {res['summary_added']['hit@all']} lenient {res['summary_added']['lenient_hit']} "

@@ -49,9 +49,12 @@ def recent_transcripts(projects_dir: Path, hours: float = 24, limit: int = 40) -
 
 def observe_everything(store: Store, *, repos=None, build_repos=None, list_prs: Callable[[str], list[int]] = list_open_prs, get_pr: Callable[[str, int], dict] = fetch_pr,
                        get_build: Callable[[str], dict | None] = fetch_latest, transcripts: list[Path] | None = None,
-                       get_board_agents: Callable[[], list[dict]] | None = None) -> dict:
+                       get_board_agents: Callable[[], list[dict]] | None = None, get_board_asks: Callable[[], list[dict]] | None = None,
+                       watcher: Callable[[Store], dict] | None = None) -> dict:
     """`repos` and `build_repos` default to the configuration (see config.py); build_repos are repository names whose PRs a CI pipeline builds.
-    `get_board_agents` (writers/board_agents.fetch_agents in observe_all) reads the work board's agents; None skips it."""
+    `get_board_agents` (writers/board_agents.fetch_agents in observe_all) reads the work board's agents; None skips it. `get_board_asks`
+    (board_asks.fetch_asks) reads its open asks and `watcher` (watcher_health.observe_watcher) the watcher's health; both None skip. A board that is
+    not running is quiet for asks (the watcher state says so); other failures are recorded, never fatal."""
     repos = config.get_list("github_repos") if repos is None else repos
     build_repos = config.get_list("build_repos") if build_repos is None else build_repos
     result = {"prs": 0, "builds": 0, "agents": 0, "errors": []}
@@ -91,4 +94,18 @@ def observe_everything(store: Store, *, repos=None, build_repos=None, list_prs: 
             result["board_agents"] = observe_board_agents(store, get_board_agents())["agents"]
         except Exception as e:
             result["errors"].append(f"board agents: {str(e)[:120]}")
+    if get_board_asks is not None:
+        from .board_asks import observe_board_asks
+        try:
+            result["board_asks"] = observe_board_asks(store, get_board_asks())["open"]
+        except OSError:
+            pass                                               # board not running: watcher.status carries that
+        except Exception as e:
+            result["errors"].append(f"board asks: {str(e)[:120]}")
+    if watcher is not None:
+        try:
+            watcher(store)
+            result["watcher"] = 1
+        except Exception as e:
+            result["errors"].append(f"watcher: {str(e)[:120]}")
     return result

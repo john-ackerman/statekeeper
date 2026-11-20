@@ -1041,6 +1041,54 @@
    "verified": "code: a condition about deploying is not a question about the release",
    "note": "guard: ship intent false positive",
    "added": "2026-11-20 recall-dev (sk-improve)"
+  },
+  {
+   "id": "howto-pdf-cd-pipeline",
+   "category": "howto",
+   "prompt": "check the PDF converter CD pipeline for the deploy",
+   "expect": [
+    [
+     1486,
+     4137,
+     4138
+    ]
+   ],
+   "stale": [],
+   "verified": "store: #1486 holds pipeline 139 / project Virtuous Platform; the coordinator hit this as a real miss on 2026-11-20 (guessed the wrong org/project). The org and az commands were given by John's session, not independently re-run here.",
+   "note": "real recall failure 2026-11-20: the per-prompt hook listed 'pdfconverter-api-cd, PDF service, az, pipeline 139' as omitted #4137/#4138 are the how-to states added 2026-11-20 (live store only, not in this snapshot) so the group lists them for later snapshots.",
+   "added": "2026-11-20 recall-dev-3"
+  },
+  {
+   "id": "howto-pdf-deploy-prod",
+   "category": "howto",
+   "prompt": "did the PDF service deploy reach prod",
+   "expect": [
+    [
+     1486,
+     4137,
+     4138
+    ]
+   ],
+   "stale": [],
+   "verified": "store: #1486 holds pipeline 139 / project Virtuous Platform; the coordinator hit this as a real miss on 2026-11-20 (guessed the wrong org/project). The org and az commands were given by John's session, not independently re-run here.",
+   "note": "real recall failure 2026-11-20: the per-prompt hook listed 'pdfconverter-api-cd, PDF service, az, pipeline 139' as omitted #4137/#4138 are the how-to states added 2026-11-20 (live store only, not in this snapshot) so the group lists them for later snapshots.",
+   "added": "2026-11-20 recall-dev-3"
+  },
+  {
+   "id": "howto-watch-pdfconverter-cd",
+   "category": "howto",
+   "prompt": "watch the pdfconverter-api-cd run",
+   "expect": [
+    [
+     1486,
+     4137,
+     4138
+    ]
+   ],
+   "stale": [],
+   "verified": "store: #1486 holds pipeline 139 / project Virtuous Platform; the coordinator hit this as a real miss on 2026-11-20 (guessed the wrong org/project). The org and az commands were given by John's session, not independently re-run here.",
+   "note": "real recall failure 2026-11-20: the per-prompt hook listed 'pdfconverter-api-cd, PDF service, az, pipeline 139' as omitted #4137/#4138 are the how-to states added 2026-11-20 (live store only, not in this snapshot) so the group lists them for later snapshots.",
+   "added": "2026-11-20 recall-dev-3"
   }
  ],
  "_remapped_from": "cases.json (original snapshot); ids remapped by eval/remap_cases.py, moved cases re-verified by hand (see 'reverified')",

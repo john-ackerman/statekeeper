@@ -15,6 +15,8 @@ TOPIC_INDEX = __import__("os").environ.get("STATEKEEPER_TOPIC_INDEX", "1").strip
 WITH_NOTE = __import__("os").environ.get("STATEKEEPER_SESSION_NOTE", "1").strip().lower() not in ("0", "off", "false", "no")   # 0: no hand-written note
 RUNNING = __import__("os").environ.get("STATEKEEPER_RUNNING", "1").strip().lower() not in ("0", "off", "false", "no")          # the what's-running roll-up
 BOARD_AGENT_PREFIX = "board agent "
+ASK_PREFIX = "board ask "
+WATCHER_THING = "work-board watcher"
 
 
 def whats_running(store: Store, *, now: datetime | None = None) -> list[str]:
@@ -35,6 +37,27 @@ def whats_running(store: Store, *, now: datetime | None = None) -> list[str]:
                 agents.append(f"  - {s.thing_name[len(BOARD_AGENT_PREFIX):]}: {s.text}")
     if agents:
         out += ["Agents on the board (running or waiting; `board.sh agent-get <id>`):", *sorted(agents)[:15]]
+    asks, watcher = [], []
+    for s in pool:
+        if s.state_key not in ("ask.state", "watcher.status"):
+            continue
+        try:
+            h = (now - datetime.fromisoformat((s.confirmed_utc or s.recorded_utc)[:19]).replace(tzinfo=timezone.utc)).total_seconds() / 3600
+        except ValueError:
+            continue
+        if h > STALE_HOURS:
+            continue                                       # not re-read lately: the board or the observer is down, so say nothing rather than guess
+        if s.state_key == "ask.state" and s.thing_name.startswith(ASK_PREFIX) and s.text.startswith("open"):
+            asks.append((not s.thing_name.startswith(ASK_PREFIX + "auto-"), s.text.split(" · since ")[-1], s.text))
+        elif s.state_key == "watcher.status" and s.thing_name == WATCHER_THING:
+            watcher.append(f"{s.thing_name}: {s.text}")
+    if asks:
+        asks.sort(reverse=True)                            # asks John or an agent wrote first (the board's own auto-* chores last), newest first
+        out += [f"Open asks on the board ({len(asks)}; `board.sh ask-list`):",
+                *[f"  - {t.split(' · ', 1)[1].replace(' · since ', ' since ', 1)}" for _h, _d, t in asks[:8]]]
+        if len(asks) > 8:
+            out.append(f"  - ... and {len(asks) - 8} more")
+    out += watcher[:1]
     rel = latest_release(pool)
     if rel:
         out += [f"Last release: {rel[0].thing_name}: " + "; ".join(" ".join(x.text.split())[:160] for x in rel)]

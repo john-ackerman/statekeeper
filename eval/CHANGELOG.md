@@ -200,3 +200,123 @@ for John"` already flows into the roll-up).
    compare: any time a session asks for something the note had, log it as a miss (`sk` misses report).
 4. Rollback: remove the env var (the note is back on the next session start); nothing is deleted.
    Size: the block drops from ~14.9k to ~12.8k chars (note -2.1k, roll-up +0.4k).
+
+## Round 3 (recall-dev-3, 2026-11-20 evening): observers for the working-note gaps, pending items as states, session-core credit, note-off trial
+
+Store backed up first: `~/.claude/statekeeper/backups/shadow-20261120-111309.db` (integrity ok). Nothing superseded or retired among states that existed
+before this round; the only retire is #4136 -> #4137, a duplicate this round wrote itself (below).
+
+### 1. Two observers (live now: written by `tools/observe_all.py`, nightly and the 20-minute shadow-hook run once main has this commit)
+
+- `writers/board_asks.py`: board `/api/asks` (read only) -> keyed `ask.state` on "board ask <id>": `open · decide · since 2026-11-16 · <title, 110 chars>`.
+  Titles only (never the body), at most 40 open asks per read (newest first), the value carries the creation DATE so an unchanged ask only confirms.
+  An ask that is done gets `done ...` once; one that vanished from the board gets `gone ...` once. 22 open asks were written on the first live read
+  (11 of them are the board's own `auto-*` "re-run CI" chores; the roll-up lists the others first).
+- `writers/watcher_health.py`: heartbeat file `C:/repos/_handoffs/orch-watch-heartbeat` (epoch seconds; mtime as fallback), the pause flag
+  `orch-watch.paused`, and whether the board answers `/` -> keyed `watcher.status` on "work-board watcher":
+  `running | heartbeat stale | not running | paused (idle flag set, watcher not expected) | no heartbeat file · board server answering/NOT answering · last
+  heartbeat Nm ago`. Same state word = confirm only. Thresholds: fresh <= 20 min, dead > 180 min. Read from this machine's handoffs dir (override
+  `STATEKEEPER_HANDOFFS_DIR`).
+- Wiring: `observe_everything(get_board_asks=, watcher=)`; the board being down is quiet for asks (the watcher state says so), any other failure is
+  recorded in `errors`, never fatal. `session.whats_running` gains "Open asks on the board (N)" (top 8, the board's `auto-*` chores last, "... and N
+  more") and one "work-board watcher: ..." line; both only when re-read within STALE_HOURS (6), so a dead observer or board shows nothing instead of
+  a stale claim. Roll-up cost: about +1.1k chars when asks are many.
+- Switches: `STATEKEEPER_BOARD_ASKS=0`, `STATEKEEPER_WATCHER=0` (observe_all), `STATEKEEPER_RUNNING=0` (the roll-up section).
+- Tests: `tests/test_board_asks_watcher.py` (9 tests: title-only, confirm vs final value, cap, quiet board-down, roll-up, watcher states by age/pause/server,
+  missing directory). Suite: 215 tests, OK.
+
+### 2. The working note's pending items, verified, as states
+
+The current note is the 2026-11-18 22:40 one (42 h old). Each item checked against reality before copying:
+
+| Note item | Reality (2026-11-20) | Done |
+|---|---|---|
+| install-supervisor-task.ps1 pending for John | schtasks lists no supervisor task; script exists | #4139 written (the 11-18 #4022 falls out of the 72 h window tomorrow) |
+| board-health hook snippet pending | no board_health in ~/.claude/settings.json; snippet exists | #4140 |
+| AntiXss worktree needs commit | `.claude/worktrees/xss-fix`: AntiXssSanitizingFilterTests.cs modified (2+/3-), uncommitted; the "BOM restore" detail not verified | #4141 (BOM left out) |
+| #3329 base merge | 3329 merged | moot, not written |
+| held PDF merges (#2132) | #2132 MERGED; #2129 open approved, #2130 open no review (the PR writer tracks both) | moot, not written |
+| Tim's #3329 questions | 3329 merged | moot |
+| #3340 not in prod | #3340 merged 11-18 21:22Z; whether a later release shipped it is NOT verified (#4001 says not in build 13801) | not written |
+| #3320 stacked on #3266 | #3320's base is the CRM-2970 branch, open, approved; stacking claim not verified | not written (PR states are tracked) |
+| #3375 demo ask | no ask for it on the board; PR open approved, 16 checks green, demo files exist | moot |
+| CI reruns queued | the board now carries them as `auto-rerun-*` asks | carried by the asks observer |
+| watcher armed / re-arm | board health: idle pause flag set | carried by watcher.status |
+| jobs staging-slot drain (option 3), lockBehavior, "John asks Jen" about the storage 403 | no state, file or PR found to verify any of them | NOT written (unverified); lockBehavior is #3988 |
+
+All three new states are `proposed/claimed` (agent writes); they show in the roll-up's "Pending for John" (verified) but not in per-prompt recall until
+corroborated.
+
+### 3. Session-core credit in the eval
+
+`run_eval.py` now also reports, beside every old number, hit@all/full "with credit for facts already in the session block": an expected state counts
+when its text is in `session_block` with the note OFF (core + topic index + tracked + roll-up). Per row: `in_session_block`, `core_hit`, `core_full`.
+Old metrics are unchanged and still printed first.
+
+### 4. Note-off trial: prepared, NOT enabled
+
+**What to set.** `STATEKEEPER_SESSION_NOTE=0`, read by `session.py` at import, so it must be in the SessionStart hook's environment. The hooks
+(`adapters/claude_code/inject_hook.py`, `subagent_hook.py`, `precompact_hook.py`) are launched by Claude Code and inherit the `env` block of
+`~/.claude/settings.json` (today lines 2-7: `CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS`, `NTFY_TOPIC`, `STATEKEEPER_INJECT`, `STATEKEEPER_CURATE_AT`). Add
+`"STATEKEEPER_SESSION_NOTE": "0"` there; it applies from the next session start. (Changing settings.json is John's step; I did not touch it.)
+`sk note` keeps working; the note stays in the store and is still the compaction-time fallback.
+**Rollback:** delete that line; the note is back at the next session start; nothing is deleted either way.
+
+**What to log as a miss.** Any time during the week a session (or John) has to ask for, or rediscovers, something the note used to carry: write one
+line to `C:/repos/_handoffs/note-off-misses.md` as `date | what was needed | where it was found (store id / file / John) | was it in the 11-18 note?`.
+The store's own miss log (`python tools/misses_report.py`) also records recall misses the hooks see; use it for the same week.
+
+**How to judge** (at day 7): (1) number of note-needed misses; target <= 2 that were not already stale in the note; (2) no "what is pending for me" question
+John had to answer by hand that the roll-up (Pending for John / Open asks / agents) should have shown; (3) session start about 1.5k chars shorter
+(note-off 14.5k vs 16.0k with the note on, measured on the live store 2026-11-20). If the misses cluster on one kind of item, write that kind as states
+(`sk add <thing> "... is pending for John"`) rather than turning the note back on.
+
+**Dry run (live store, 2026-11-20, `session_block` with the note off, 14.5k chars) against the note's still-true items:**
+
+| Still-true item | In the note-off block? |
+|---|---|
+| Build 13801 shipped | yes (Last release) |
+| Supervisor task / board-health hook pending for John | yes (#4139/#4140/#4022/#4023 under Pending for John) |
+| xss-fix worktree needs a commit | yes (#4141) |
+| Open decisions on the board (3313, 3349, 3342, 3376, kickoff, ReDoS ...) and CI re-run chores | yes (Open asks, 22) |
+| Watcher state (paused by idle flag, board answering) | yes (watcher line) |
+| Running agents | partly: board-registered agents only; transcript agents have no task |
+| Never merge / ready / reply to humans / approve prod gates | yes (core) |
+| "Agents push only via gh-safe" as a standing rule | NO: only gh-safe tips exist (#3687, #3793, #1450); it is a core rule, so John's say-so to add |
+| QA login tool path | not in the block (it is in MEMORY.md, loaded every session, and recall #3959) |
+| Statekeeper cutover applied / rollback; LD flags created off; board To-do grouping | not in the block (history; recall finds #4002/#4004, #2156) |
+| Jobs drain idea, lockBehavior, "John asks Jen" | not in the block; the first and last could not be verified at all; lockBehavior is #3988 (recall) |
+
+Gap list: one real gap (gh-safe rule). The rest are history, loaded elsewhere, or unverifiable.
+
+Numbers (snapshot 17:02, 55 original cases, hook mode; same code path as before, old numbers unchanged): strict hit 0.582, lenient 0.818, stale 0.
+With credit for the session block (note off): hit@all 0.582 -> 0.618 (+2: `dec-prod-gates` via #3994 "John runs every prod gate himself", `ppl-dictation` via
+#340/#1825); full 0.582 -> 0.618. 16 cases have an expected state in the session block; 14 of them the hook also found. Recall mode: strict 0.655 / lenient 0.800
+(unchanged). Three new cases were added (below), so "added" is now 7 cases: hook 0.429, recall 0.571.
+
+### Real recall failure: "watch the PDF converter deploy" (reported by the coordinator, 2026-11-20)
+
+Cases added (`howto-pdf-cd-pipeline`, `howto-pdf-deploy-prod`, `howto-watch-pdfconverter-cd`, expect #1486 or the new how-to #4137/#4138). All three MISS in
+hook mode (one injects nothing) and two in recall mode; they are in the eval as honest misses.
+
+Why the hook omitted it (probe on the 17:02 snapshot and a copy of the live store; `eval/probe.py`, `retrieve.select`):
+1. **Filing.** #1486 is filed under the thing "#2026" ("#2026 is deployed: ... pdfconverter-api-cd (pipeline 139, Virtuous Platform) run 74020 succeeded"), so a
+   prompt naming the pipeline or "PDF converter" never names its thing; it can only qualify by meaning.
+2. **Floor.** By meaning #1486 scores 0.729 / 0.671 / 0.782 on the three prompts against the hook floor 0.72: the second is under it and never qualifies.
+3. **Ranking and caps (the main one).** A state of a *specific* named thing (<= 6 states) is scored 1.0 + cos/10 whatever it says, above every
+   meaning-only match (< 1.0). "PDF converter" and "pdf-converter" (spelled in the prompt; few states) put #649 (an agent changing maxReplicas), #2016 (a
+   replica formula) and #4095 (non-root uid) in first, and the hook's cap of 3 things / 5 states cut the rest ("13 omitted" includes `pdfconverter-api-cd`
+   itself, whose own #3760 was also dropped as older than #3761 "PR #2092 ... auto-deployed to prod by CD run 74020").
+4. The org/project/commands were never stated as a how-to anywhere (`sk search "dev.azure.com virtuoussoftware"` and `"az devops invoke timeline"` found
+   nothing); #1486 only holds the pipeline id and project.
+
+Tried: score a specific-named state by its meaning (cos + 0.03) when it is also above the floor, so a name alone cannot outrank a closer state. Result on the
+17:02 snapshot: strict hit unchanged (0.582), lenient unchanged (0.818), hit@1 0.436 -> 0.418, MRR 0.496 -> 0.487, and #1486 still not surfaced.
+Rejected and reverted (not in the commit). A principled fix needs the filing (#1486 under the pipeline thing, a supersede = a later reviewed step) or the
+updater linking a state to every thing its text names.
+
+Added to the live store (stable how-to under "pdfconverter-api-cd", commands re-run today: run 74594, pipeline 139, stage timeline): #4137 (list runs: org
+https://dev.azure.com/virtuoussoftware, project "Virtuous Platform", --pipeline-ids 139) and #4138 (per-stage result via `az devops invoke --area build
+--resource timeline`). `sk add` wrote a first, too-long version (#4136) despite its "long" warning; I retired my own #4136 into #4137 (the one retire this
+round, on a state created minutes earlier). Both new states are `proposed` (agent claims), which the per-prompt hook does not show; with the two
+activated on a copy of the store, the exact-name prompt ("watch the pdfconverter-api-cd run") surfaced #4138 and the other two did not (cap again).

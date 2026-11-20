@@ -28,8 +28,13 @@ def main() -> int:
     ap.add_argument("--db", default=str(Path.home() / ".claude" / "statekeeper" / "shadow.db"))
     args = ap.parse_args()
     from statekeeper.writers.board_agents import fetch_agents
+    from statekeeper.writers.board_asks import fetch_asks
+    from statekeeper.writers.watcher_health import observe_watcher
+    off = lambda name: os.environ.get(name, "1") in ("0", "off")  # noqa: E731
     result = observe_everything(SqliteStore(args.db), transcripts=recent_transcripts(Path.home() / ".claude" / "projects"),
-                                get_board_agents=None if os.environ.get("STATEKEEPER_BOARD_AGENTS", "1") in ("0", "off") else fetch_agents)
+                                get_board_agents=None if off("STATEKEEPER_BOARD_AGENTS") else fetch_agents,
+                                get_board_asks=None if off("STATEKEEPER_BOARD_ASKS") else fetch_asks,
+                                watcher=None if off("STATEKEEPER_WATCHER") else observe_watcher)
     print(json.dumps(result))
     return 0 if not result["errors"] else 1
 

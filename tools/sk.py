@@ -13,6 +13,10 @@
     python tools/sk.py [--db PATH] alias <thing> <alias>        another name people use for a thing ("sign in to QA" for a login tool)
     python tools/sk.py [--db PATH] core                         the session-start block (core, working note, tracked now)
     python tools/sk.py [--db PATH] note [--content <text|->]    print, or replace, the working note (where I am, what is running, what is next)
+    python tools/sk.py [--db PATH] dupes [thing] [--json] [--confidence high|medium|low]
+                                                                proposed merges: the same fact under several ids (and likely updates), with the
+                                                                evidence; writes nothing (format: eval/UPDATER.md)
+    python tools/sk.py [--db PATH] retire <id> --into <keep>    accept one: close #id as replaced by #keep (kept as history)
 
 Every write goes through the Store API (event log, evidence required). Text `-` reads stdin. STATEKEEPER_DB / --db choose the store;
 STATEKEEPER_SESSION (or CLAUDE_SESSION_ID) is recorded as the session of a write when set.
@@ -179,6 +183,15 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--limit", type=int, default=30)
     p = sub.add_parser("note")
     p.add_argument("--content", default=None)
+    p = sub.add_parser("dupes", help="proposed merges: the same fact stored under several ids (and likely updates), with the evidence; writes nothing")
+    p.add_argument("thing", nargs="*", help="only clusters touching this thing")
+    p.add_argument("--json", action="store_true", help="the proposals as JSON lines (the updater proposal format, eval/UPDATER.md)")
+    p.add_argument("--limit", type=int, default=40)
+    p.add_argument("--confidence", default="low", choices=["high", "medium", "low"], help="lowest confidence to list")
+    p = sub.add_parser("retire", help="accept a dupes proposal: close #id as replaced by the state it restates (kept as history)")
+    p.add_argument("id", type=lambda v: int(v.lstrip("#")))
+    p.add_argument("--into", required=True, type=lambda v: int(v.lstrip("#")))
+    p.add_argument("--reason", default="restates the kept state (sk dupes)")
     args = ap.parse_args(argv)
     store = SqliteStore(args.db)
     try:
@@ -246,6 +259,30 @@ def main(argv: list[str] | None = None) -> int:
             print(f"{t.name}: {len(states)} newest standing states under it (sub-areas included)")
             for s in states:
                 print(_line(s))
+        elif args.cmd == "dupes":
+            import json
+            from statekeeper.canonical import proposals
+            levels = ["high", "medium", "low"][:["high", "medium", "low"].index(args.confidence) + 1]
+            props = [p for p in proposals(store, limit=100000, thing=" ".join(args.thing) or None) if p["confidence"] in levels][:args.limit]
+            if args.json:
+                for p in props:
+                    print(json.dumps(p, ensure_ascii=False))
+                return 0
+            print(f"{len(props)} proposals (nothing written; accept one with `sk retire <id> --into <keep>`)")
+            for p in props:
+                print(f"\n[{p['confidence']}] {p['relation']}: keep #{p['keep']} ({p['why_keep']})")
+                for sid, line in p["texts"].items():
+                    ev = p["evidence"].get(sid)
+                    mark = "KEEP  " if int(sid) == p["keep"] else "RETIRE"
+                    detail = "" if ev is None else (f"  <- cos {ev['cosine']}, overlap {ev['jaccard']}/{ev['containment']}"
+                                                    + (f", same source {', '.join(ev['shared_sources'][:2])}" if ev["shared_sources"] else ", different sources"))
+                    print(f"  {mark} #{sid} {line[:170]}{detail}")
+        elif args.cmd == "retire":
+            old, keep = store.get_state(args.id), store.get_state(args.into)
+            if old is None or not old.standing or keep is None or not keep.standing:
+                raise SystemExit("both states must be standing")
+            store.close_state(old.id, args.reason, replaced_by=keep.id, actor=args.actor)
+            print(f"#{old.id} -> #{keep.id} {_line(keep)}")
         elif args.cmd == "core":
             from statekeeper.session import session_block
             print(session_block(store, budget=100000))

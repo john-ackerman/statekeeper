@@ -571,6 +571,53 @@ def select(store: Store, text: str, embedder: Optional[Embedder], *, floor: floa
             if s.id in vec and any(o.id != s.id and o.recency > s.recency and cosine(vec[s.id], vec[o.id]) >= SAME_SUBJECT for o in plain):
                 continue
         kept.append((score, s))
+    from . import canonical as _canon
+    scored = kept
+    if _canon.ON and vec:
+        # the same fact stored under several ids is one fact: show its canonical once, at the best rank any copy earned (canonical.py)
+        plain_all = [s for s in standing_all if not s.state_key]
+        cidx = _canon.Index(plain_all, store.evidence_of([s.id for s in plain_all]), vec, df=df)    # word rarity as select already counted it
+        cidx.named = frozenset(tid for tid, (_t, why, _s) in named.items() if why == "named")
+
+        def eligible(c: State) -> str:
+            ct = thing_of(c.thing_id)
+            if c.id in skip_state_ids:
+                return "core"                                         # shown earlier in this session
+            if ct is None or ct.retired or ct.name.lower() in exclude_names or c.id in concept_off or c.id in meaning_off:
+                return "no"
+            if (blocked_any.get(c.id, set()) | pairs.get(c.thing_id, set())) & present:
+                return "no"
+            if ct.kind in exclude_kinds and c.status == "active" and c.volatility in ("rule", "stable"):
+                return "core"                                         # the session core already shows it
+            return "ok"
+        sub, drop, _recency = _canon.collapse([s for _, s in scored], cidx, eligible=eligible)
+        if sub or drop:
+            merged: list[tuple[float, State]] = []
+            for score, s in scored:
+                if s.id in drop:
+                    continue
+                if s.id in sub:
+                    c = cidx.by_id[sub[s.id]]
+                    reasons[c.id] = {**reasons.get(s.id, {}), "same_as": s.id}
+                    merged.append((score, c))
+                else:
+                    merged.append((score, s))
+            scored = merged
+    if _canon.ON:
+        # a thing whose own newest word is "frozen / retired / kept only as history": what was recorded about it before that is history (canonical.py)
+        over = _canon.overtaken_by_retirement([s for _, s in scored], _canon.retired_things(standing_all), text)
+        if over:
+            merged, seen_decl = [], {s.id for _, s in scored}
+            for score, s in scored:
+                d = over.get(s.id)
+                if d is None:
+                    merged.append((score, s))
+                elif d.id not in seen_decl and d.id not in skip_state_ids:
+                    merged.append((score, d))
+                    reasons[d.id] = {**reasons.get(s.id, {}), "retired_over": s.id}
+                    seen_decl.add(d.id)
+            scored = merged
+    kept = scored
     items: dict[int, Item] = {}
     order: list[int] = []
     for score, s in kept:
@@ -611,6 +658,10 @@ def select(store: Store, text: str, embedder: Optional[Embedder], *, floor: floa
 
 def reason_tag(r: dict) -> str:
     """A compact "how connected" tag for the injected line, only where the connection is not obvious from the line itself (a name it carries)."""
+    if r.get("same_as"):
+        return f"same fact as #{r['same_as']}"                        # shown in place of a restatement that matched (canonical.py)
+    if r.get("retired_over"):
+        return f"newer than #{r['retired_over']}, which is history now"  # the thing #N described was since declared frozen/retired
     if r.get("via") == "asked" and r.get("q") is not None:
         return f"asked ~{r['q']:.2f}"
     if r.get("via") in ("meaning", "words", "topic") and r.get("cos") is not None:

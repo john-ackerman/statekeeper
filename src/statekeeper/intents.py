@@ -53,6 +53,11 @@ def waiting_on_john(pool: list, text: str) -> list:
     """For "is anything waiting on me": recent work notes that say something is pending for John, newest first."""
     if not WAITING.search(text):
         return []
+    return pending_for_john(pool)
+
+
+def pending_for_john(pool: list) -> list:
+    """Work notes from the last WAITING_HOURS (vs the newest note in the store) saying something is pending for John, newest first."""
     hits = [s for s in pool if s.volatility == "work" and not s.state_key and s.thing_name.lower() != "working note" and PENDING_JOHN.search(s.text)]
     if not hits:
         return []

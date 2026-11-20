@@ -12,6 +12,36 @@ STALE_HOURS = 6
 
 NOTE_THING = "working note"
 TOPIC_INDEX = __import__("os").environ.get("STATEKEEPER_TOPIC_INDEX", "1").strip().lower() not in ("0", "off", "false", "no")
+WITH_NOTE = __import__("os").environ.get("STATEKEEPER_SESSION_NOTE", "1").strip().lower() not in ("0", "off", "false", "no")   # 0: no hand-written note
+RUNNING = __import__("os").environ.get("STATEKEEPER_RUNNING", "1").strip().lower() not in ("0", "off", "false", "no")          # the what's-running roll-up
+BOARD_AGENT_PREFIX = "board agent "
+
+
+def whats_running(store: Store, *, now: datetime | None = None) -> list[str]:
+    """What is in flight, from outside reads and recent notes, not from the hand-written note: agents on the work board that are still running or
+    waiting (with what they are for), the newest release, and recent notes saying something is pending for John. Open PRs are in "Tracked now"."""
+    from .intents import latest_release, pending_for_john
+    now = now or datetime.now(timezone.utc)
+    out: list[str] = []
+    pool = store.searchable_states()
+    agents = []
+    for s in pool:
+        if s.state_key == "agent.status" and s.thing_name.startswith(BOARD_AGENT_PREFIX) and not s.text.startswith(("reported", "done", "finished", "cancelled")):
+            try:
+                h = (now - datetime.fromisoformat((s.confirmed_utc or s.recorded_utc)[:19]).replace(tzinfo=timezone.utc)).total_seconds() / 3600
+            except ValueError:
+                continue
+            if h <= STALE_HOURS:
+                agents.append(f"  - {s.thing_name[len(BOARD_AGENT_PREFIX):]}: {s.text}")
+    if agents:
+        out += ["Agents on the board (running or waiting; `board.sh agent-get <id>`):", *sorted(agents)[:15]]
+    rel = latest_release(pool)
+    if rel:
+        out += [f"Last release: {rel[0].thing_name}: " + "; ".join(" ".join(x.text.split())[:160] for x in rel)]
+    pend = pending_for_john(pool)
+    if pend:
+        out += ["Pending for John (notes from the last 72h):", *[f"  - #{s.id} {' '.join(s.text.split())[:180]}" for s in pend[:8]]]
+    return out
 
 
 def session_block(store: Store, *, budget: int = 9000) -> str:
@@ -33,7 +63,7 @@ def session_block(store: Store, *, budget: int = 9000) -> str:
                 lines += ["", idx]
         except Exception:
             pass                                           # the index is a convenience: never fail the session start for it
-    note = store.find(NOTE_THING)
+    note = store.find(NOTE_THING) if WITH_NOTE else None
     if note:
         cur = [s for s in store.states_of(note.id) if s.state_key == "note" and s.status == "active"]
         if cur:
@@ -58,5 +88,12 @@ def session_block(store: Store, *, budget: int = 9000) -> str:
             tracked.append(f"- {t.name}: {cur['agent.status'].text}")
     if tracked:
         lines += ["", "Tracked now (from outside reads; each has a last-verified time in the store):", *tracked[:40]]
+    if RUNNING:
+        try:
+            running = whats_running(store, now=now)
+        except Exception:
+            running = []                                   # a convenience: never fail the session start for it
+        if running:
+            lines += ["", "What's running (derived from the store, not hand-written):", *running]
     text = "\n".join(lines)
     return text if len(text) <= budget else text[:budget - 20] + "\n[truncated]"

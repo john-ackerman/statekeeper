@@ -27,7 +27,9 @@ def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--db", default=str(Path.home() / ".claude" / "statekeeper" / "shadow.db"))
     args = ap.parse_args()
-    result = observe_everything(SqliteStore(args.db), transcripts=recent_transcripts(Path.home() / ".claude" / "projects"))
+    from statekeeper.writers.board_agents import fetch_agents
+    result = observe_everything(SqliteStore(args.db), transcripts=recent_transcripts(Path.home() / ".claude" / "projects"),
+                                get_board_agents=None if os.environ.get("STATEKEEPER_BOARD_AGENTS", "1") in ("0", "off") else fetch_agents)
     print(json.dumps(result))
     return 0 if not result["errors"] else 1
 

@@ -1,0 +1,917 @@
+{
+ "_readme": "Retrieval eval cases for Statekeeper recall. Ids refer to the frozen snapshot named in 'snapshot'. expect = list of groups; a group is satisfied when ANY of its state ids is injected, or (if given) any of its regexes matches an injected line. Every group must be satisfied for 'full'; 'hit' = at least one group satisfied. stale = state ids that must NOT be injected for this prompt (still 'active' in the store but contradicted by a newer fact or by reality). channel 'hook' = per-prompt injection; every case also records whether its expected ids are reachable from the SessionStart core block. verified: how the truth was checked (gh = gh pr view at 2026-11-20 ~15:3x UTC; file = path exists on disk; code = read in repo; store = point-in-time store statement only, NOT independently verified; owner = John's own words recorded as owner/verified trust). also_ok = states adjudicated by hand (reading the injected text on the first baseline run) as relevant restatements or partial answers that are not the primary expected state: they count for the lenient metrics and are not noise. Adjudication is mine, not John's; treat the lenient numbers as an upper bound.",
+ "snapshot": "snapshots/shadow-20261120-092640.db",
+ "cases": [
+  {
+   "id": "pr-sendgrid-webhook",
+   "category": "live-pr",
+   "prompt": "what's the state of the SendGrid webhook PR",
+   "expect": [
+    [
+     854,
+     1436,
+     856,
+     2043,
+     3482,
+     3628
+    ]
+   ],
+   "stale": [
+    3597
+   ],
+   "verified": "gh: PR 3342 is OPEN draft, CRM-3150 'Verify SendGrid event webhook signatures' (no review decision). Store states 854/856/1436 match. #3597 ('key model decision still open') predates John's decision #2043.",
+   "note": "John's example prompt. Today's real hook returns the unrelated #3629 (SendGrid subuser numbers)."
+  },
+  {
+   "id": "pr-3342-draft-by-number",
+   "category": "live-pr",
+   "prompt": "is 3342 still a draft",
+   "expect": [
+    [
+     854
+    ]
+   ],
+   "stale": [],
+   "verified": "gh: PR 3342 isDraft=true, state OPEN",
+   "note": "bare PR number, no thing name 'VirtuousV2 PR 3342' in the prompt"
+  },
+  {
+   "id": "pr-3266-ci",
+   "category": "live-pr",
+   "prompt": "where are we on CI for 3266",
+   "expect": [
+    [
+     1644,
+     1476,
+     922
+    ]
+   ],
+   "stale": [],
+   "verified": "gh: PR 3266 OPEN, head 5fe6ae9 matches store; store says CI red at 15:11 UTC, gh shortly after shows 2 CANCELLED/12 SUCCESS (reruns queued), so the CI value drifts within ~20 min. Counted as freshness-window, not store error.",
+   "note": "bare PR number"
+  },
+  {
+   "id": "pr-3349-question",
+   "category": "live-pr",
+   "prompt": "can you refresh me on what your original question was for 3349, what do you mean by gating the donor receipt list",
+   "expect": [
+    [
+     840,
+     3822,
+     842,
+     3446,
+     3532,
+     3490
+    ]
+   ],
+   "stale": [
+    3490
+   ],
+   "verified": "gh: PR 3349 OPEN draft CRM-3152 'Require Gift read for receipts and Run Receipting to publish'. #3490 ('builder still running at a83ea16') is a 2026-11-16 in-flight statement, stale now that CI is green on 171cb6c.",
+   "note": "Real prompt from 2026-11-20 15:26 UTC: live hook injected NOTHING (see shadow_injections). #3490 is accepted as relevant but listed stale so leakage is measured separately: a hit on 3446/3532/840/3822 is the goal."
+  },
+  {
+   "id": "pr-3313-copilot",
+   "category": "live-pr",
+   "prompt": "Copilot left a message on 3313 about the grace period being longer than the stuck threshold, double check that it's valid",
+   "expect": [
+    [
+     918,
+     3818,
+     2176,
+     3951,
+     3299,
+     66
+    ]
+   ],
+   "stale": [],
+   "verified": "gh: PR 3313 OPEN APPROVED, CRM-3074 'Detect undelivered email receipts and stuck runs every 30 min'",
+   "note": "Real prompt 15:24 UTC: live hook injected nothing."
+  },
+  {
+   "id": "pr-lob-webhook",
+   "category": "live-pr",
+   "prompt": "did the Lob webhook PR merge",
+   "expect": [
+    [
+     1567,
+     3814,
+     4029,
+     3482,
+     3597
+    ]
+   ],
+   "stale": [],
+   "verified": "gh: PR 3343 (CRM-3151 Lob signatures) MERGED 2026-11-20T15:21Z, i.e. 10 min AFTER the snapshot's last observe (15:11), so the store correctly said open at snapshot time. Freshness-window case: grading is on surfacing the PR's state, not on the final truth.",
+   "note": "recall can only be as fresh as the 20-min observe cycle",
+   "also_ok": [
+    2044
+   ]
+  },
+  {
+   "id": "pr-datepicker-shipped",
+   "category": "live-pr",
+   "prompt": "did the datepicker ship",
+   "expect": [
+    [
+     4000,
+     4001,
+     1619
+    ]
+   ],
+   "stale": [
+    1448,
+    692,
+    3641
+   ],
+   "verified": "gh: PR 3340 MERGED 2026-11-18 and #3337/#3338 MERGED 2026-11-18; store #4000 'build 7.15.95.13801 has shipped', #4001 '#3340 not in that build'. #1448 is a proposal ('release plan proposes') now outdated.",
+   "note": "John's example prompt. Real answer lives under 'Build ...' / '#3340' things, not 'Datepicker'; today's hook returns the proposal #1448."
+  },
+  {
+   "id": "pr-3340-prod",
+   "category": "live-pr",
+   "prompt": "is 3340 in prod yet",
+   "expect": [
+    [
+     4001,
+     1619,
+     4000
+    ]
+   ],
+   "stale": [
+    692,
+    3641
+   ],
+   "verified": "gh: PR 3340 MERGED 2026-11-18; store #4001 says not in build 13801 (store-only for the prod claim). #692/#3641 ('needs another merge of the #3338 branch') were true 2026-11-16 and are superseded by the merge.",
+   "note": ""
+  },
+  {
+   "id": "pr-which-red",
+   "category": "live-pr",
+   "prompt": "which PRs are red right now",
+   "expect": [
+    [
+     1644,
+     1640
+    ]
+   ],
+   "stale": [],
+   "verified": "gh: head SHAs 5fe6ae9 (3266) and d74bcfa (3320) match the store; check conclusions were CANCELLED (reruns) shortly after the snapshot. Store-only for 'red'.",
+   "note": "aggregate question: answer is spread across many PR things; the session core Tracked-now block is the intended channel"
+  },
+  {
+   "id": "pr-security-review-left",
+   "category": "live-pr",
+   "prompt": "what's left in the receipting security review",
+   "expect": [
+    [
+     3703,
+     3446,
+     3445
+    ]
+   ],
+   "stale": [],
+   "verified": "gh: 3341 and 3343 MERGED, 3342/3349 OPEN draft, consistent with #3703 (H1 done, H2 3342, H3 3343 [now merged], H4 3349).",
+   "note": "#3703 is the 'where it stands' state; H3 portion is already 1 step behind reality"
+  },
+  {
+   "id": "pr-ld-flags-created",
+   "category": "live-pr",
+   "prompt": "did the LaunchDarkly flags for the security fixes get created",
+   "expect": [
+    [
+     2156
+    ]
+   ],
+   "stale": [],
+   "verified": "store: #2156 (ldcli, 2026-11-18) flags created, all off in prod/qa. Not independently verified (no LD token used).",
+   "note": ""
+  },
+  {
+   "id": "dec-sendgrid-key-model",
+   "category": "decision",
+   "prompt": "what did we decide about the signing key model for SendGrid",
+   "expect": [
+    [
+     2043,
+     3628,
+     3483
+    ]
+   ],
+   "stale": [
+    3597
+   ],
+   "verified": "owner: #2043 is John's decision 2026-11-17",
+   "note": ""
+  },
+  {
+   "id": "dec-flatpickr",
+   "category": "decision",
+   "prompt": "why are we using flatpickr instead of another datepicker library",
+   "expect": [
+    [
+     3284,
+     29,
+     3116
+    ]
+   ],
+   "stale": [],
+   "verified": "store: John's decision 2026-11-12 (chain ends 3284/3116)",
+   "note": "",
+   "also_ok": [
+    3124
+   ]
+  },
+  {
+   "id": "dec-merge-rule",
+   "category": "decision",
+   "prompt": "what's the rule on merging",
+   "expect": [
+    [
+     1265,
+     227,
+     287
+    ]
+   ],
+   "stale": [
+    1277
+   ],
+   "verified": "owner: #1265/#227 John's rules; #287 Claude's. #1277 is a stale per-PR merge-order note (3322 is merged: gh).",
+   "note": "John's example prompt. Today's hook returns #3322 conflict note (#1277, proposed trust) instead of the rule."
+  },
+  {
+   "id": "dec-stack-vs-fanout",
+   "category": "decision",
+   "prompt": "do we stack PRs or do parallel ones off master",
+   "expect": [
+    [
+     49,
+     3306,
+     52
+    ]
+   ],
+   "stale": [],
+   "verified": "owner: John 2026-11-12 stacking preference",
+   "note": "",
+   "also_ok": [
+    3311
+   ]
+  },
+  {
+   "id": "dec-linear-status-merged",
+   "category": "decision",
+   "prompt": "what Linear status does a ticket get when the PR is merged but not deployed yet",
+   "expect": [
+    [
+     2889
+    ]
+   ],
+   "stale": [],
+   "verified": "owner: John 2026-11-11",
+   "note": "",
+   "also_ok": [
+    2956
+   ]
+  },
+  {
+   "id": "dec-bug-ticket-shape",
+   "category": "decision",
+   "prompt": "I've got a bug report with three separate defects, how do I shape the tickets",
+   "expect": [
+    [
+     1235,
+     1234
+    ]
+   ],
+   "stale": [],
+   "verified": "owner: John 2026-11-17 ticket shape rule",
+   "note": "",
+   "also_ok": [
+    3570
+   ]
+  },
+  {
+   "id": "dec-search-linear-first",
+   "category": "decision",
+   "prompt": "do I need to look for an existing ticket before I file this one",
+   "expect": [
+    [
+     4043,
+     4044,
+     4045
+    ]
+   ],
+   "stale": [],
+   "verified": "store: rule recorded 2026-11-09",
+   "note": "different words (look for existing ticket vs search Linear)"
+  },
+  {
+   "id": "dec-prod-gates",
+   "category": "decision",
+   "prompt": "can the orchestrator approve the prod deploy gate",
+   "expect": [
+    [
+     3994,
+     3995
+    ]
+   ],
+   "stale": [],
+   "verified": "owner: standing rule 2026-11-18",
+   "note": ""
+  },
+  {
+   "id": "dec-parent-points",
+   "category": "decision",
+   "prompt": "do the points on a parent ticket have to add up from the sub-issues",
+   "expect": [
+    [
+     130,
+     783
+    ]
+   ],
+   "stale": [],
+   "verified": "owner: John 2026-11-12 pointing rule",
+   "note": "",
+   "also_ok": [
+    3109,
+    3065
+   ]
+  },
+  {
+   "id": "dec-pdf-rollout",
+   "category": "decision",
+   "prompt": "where's the PDF rollout, are the high-risk orgs at 100 yet",
+   "expect": [
+    [
+     3852,
+     3853,
+     3855
+    ]
+   ],
+   "stale": [
+    3913
+   ],
+   "verified": "store only. #3913 ('10% of high-risk, as of 11-17 PM') is contradicted by #3853 ('high-risk at 50%') and John's #3619; it has the HIGHEST id because decomposition re-wrote an old note after the newer one.",
+   "note": "stale-by-id-ordering trap"
+  },
+  {
+   "id": "dec-docraptor-removal",
+   "category": "decision",
+   "prompt": "when does the DocRaptor fallback go away",
+   "expect": [
+    [
+     4058
+    ]
+   ],
+   "stale": [],
+   "verified": "store: CRM-3089 planned about January",
+   "note": "",
+   "also_ok": [
+    299
+   ]
+  },
+  {
+   "id": "dec-receipt-model",
+   "category": "decision",
+   "prompt": "when does a gift get its receipt date, at send or at render",
+   "expect": [
+    [
+     103,
+     90
+    ]
+   ],
+   "stale": [],
+   "verified": "owner: John 2026-11-12 settled model (stamp at render)",
+   "note": "different words: 'receipt date' vs 'stamp date'",
+   "also_ok": [
+    3259
+   ]
+  },
+  {
+   "id": "dec-data-script-validate",
+   "category": "decision",
+   "prompt": "do I have to test the backfill script locally before you run it",
+   "expect": [
+    [
+     179
+    ]
+   ],
+   "stale": [],
+   "verified": "owner: John 2026-11-11 standing rule",
+   "note": "different words: backfill script vs data script",
+   "also_ok": [
+    2958,
+    2960
+   ]
+  },
+  {
+   "id": "dec-prince-fonts-base64",
+   "category": "decision",
+   "prompt": "should we embed the fonts as base64 in the Prince render",
+   "expect": [
+    [
+     3905
+    ]
+   ],
+   "stale": [],
+   "verified": "store: option rejected for 150-450 ms per render",
+   "note": ""
+  },
+  {
+   "id": "how-qa-login",
+   "category": "howto",
+   "prompt": "how do I log in to QA",
+   "expect": [
+    [
+     3858,
+     3859,
+     3959,
+     2152,
+     3863
+    ]
+   ],
+   "stale": [
+    714
+   ],
+   "verified": "file: C:/repos/_handoffs/qa-login/qa-login.mjs exists; code: e2e_tests use qa.virtuoussoftware.com (git grep), so #714 (virtualsoftware.com) is wrong",
+   "note": "John's example prompt. Today's hook returns a QA Admin URL (#3658) and #788."
+  },
+  {
+   "id": "how-qa-sessions-expire",
+   "category": "howto",
+   "prompt": "the playwright session for the qa account is dead, how do I refresh it",
+   "expect": [
+    [
+     3859,
+     3863,
+     2152
+    ]
+   ],
+   "stale": [],
+   "verified": "file: qa-login.mjs exists",
+   "note": ""
+  },
+  {
+   "id": "how-draft-ci",
+   "category": "howto",
+   "prompt": "how do I kick off the draft CI build for a PR",
+   "expect": [
+    [
+     2789,
+     2797,
+     267,
+     3991
+    ]
+   ],
+   "stale": [],
+   "verified": "store: command recorded 2026-11-09; pipeline id 119 also in agent-brief-rules.md (file read)",
+   "note": "",
+   "also_ok": [
+    2991,
+    2790
+   ]
+  },
+  {
+   "id": "how-request-copilot",
+   "category": "howto",
+   "prompt": "how do I get Copilot to review the PR from the command line",
+   "expect": [
+    [
+     660,
+     1226,
+     187
+    ]
+   ],
+   "stale": [
+    263
+   ],
+   "verified": "store: #660 (2026-11-16) says add-reviewer does NOT work, which contradicts the older #263",
+   "note": "#263 recommends the approach #660 says fails",
+   "also_ok": [
+    3552
+   ]
+  },
+  {
+   "id": "how-copilot-threads",
+   "category": "howto",
+   "prompt": "how do I resolve the Copilot comment threads",
+   "expect": [
+    [
+     15,
+     689,
+     261
+    ]
+   ],
+   "stale": [],
+   "verified": "store",
+   "note": "",
+   "also_ok": [
+    3793
+   ]
+  },
+  {
+   "id": "how-rearm-watcher",
+   "category": "howto",
+   "prompt": "the watcher died, how do I re-arm it",
+   "expect": [
+    [
+     4021,
+     2755,
+     3727,
+     4020
+    ]
+   ],
+   "stale": [
+    2753
+   ],
+   "verified": "file: C:/repos/work-board/scripts/board-watch-orch.sh exists; #2753 refers to Monitor b64ghy7x7 expiring 14:12 on 2026-11-18, long past",
+   "note": "",
+   "also_ok": [
+    3783
+   ]
+  },
+  {
+   "id": "how-board-watcher",
+   "category": "howto",
+   "prompt": "how does the board watcher work",
+   "expect": [
+    [
+     4020,
+     4021,
+     2755,
+     3724,
+     3725,
+     3727
+    ]
+   ],
+   "stale": [
+    2753
+   ],
+   "verified": "file: board-watch-orch.sh, board_health.py exist",
+   "note": "John's example prompt"
+  },
+  {
+   "id": "how-rollback-cutover",
+   "category": "howto",
+   "prompt": "how do I roll back the move off Persistence",
+   "expect": [
+    [
+     4004,
+     4005
+    ]
+   ],
+   "stale": [
+    2568
+   ],
+   "verified": "file: C:/repos/statekeeper/local/cutover/rollback_cutover.ps1 exists; #2568 is the rollback for the EARLIER migration INTO Persistence (restore claude.db), the wrong referent for 'move off Persistence'",
+   "note": "different words: roll back the move off Persistence vs cutover"
+  },
+  {
+   "id": "how-embedding-server",
+   "category": "howto",
+   "prompt": "where does the embedding server run and what happens if it's down",
+   "expect": [
+    [
+     2567
+    ]
+   ],
+   "stale": [],
+   "verified": "live: http://127.0.0.1:8081/v1/models answers with bge-small-en-v1.5-q8_0.gguf (curl at eval time)",
+   "note": ""
+  },
+  {
+   "id": "how-prod-query",
+   "category": "howto",
+   "prompt": "I need to run a query against prod, how does that work",
+   "expect": [
+    [
+     2508,
+     2509,
+     2510,
+     2514,
+     2516
+    ]
+   ],
+   "stale": [],
+   "verified": "owner: John 2026-11-09; validator location marked unverified in #2513",
+   "note": ""
+  },
+  {
+   "id": "how-launchdarkly-read",
+   "category": "howto",
+   "prompt": "how do I check what a flag is set to in production",
+   "expect": [
+    [
+     408,
+     404,
+     292,
+     406
+    ]
+   ],
+   "stale": [],
+   "verified": "store",
+   "note": "different words: flag state vs LaunchDarkly",
+   "also_ok": [
+    2523,
+    2834
+   ]
+  },
+  {
+   "id": "how-remove-worktree",
+   "category": "howto",
+   "prompt": "can I delete this agent's worktree",
+   "expect": [
+    [
+     9,
+     266
+    ]
+   ],
+   "stale": [],
+   "verified": "store (2026-11-09/16)",
+   "note": "",
+   "also_ok": [
+    3399
+   ]
+  },
+  {
+   "id": "how-coverage-gate",
+   "category": "howto",
+   "prompt": "what does the coverage gate actually score against",
+   "expect": [
+    [
+     336,
+     269,
+     2633
+    ]
+   ],
+   "stale": [],
+   "verified": "store; root CLAUDE.md describes whole-file scoring (file read)",
+   "note": "",
+   "also_ok": [
+    2734
+   ]
+  },
+  {
+   "id": "ppl-critical-reviewer",
+   "category": "people",
+   "prompt": "who has to review a critical-risk PR",
+   "expect": [
+    [
+     580
+    ]
+   ],
+   "stale": [],
+   "verified": "owner: root CLAUDE.md says Critical needs Staff+; #580 names Adam",
+   "note": "#580 is volatility 'work' on a person thing: neither per-prompt (person kind excluded) nor in the session core (rule/stable only)",
+   "also_ok": [
+    2761
+   ]
+  },
+  {
+   "id": "ppl-jeremy",
+   "category": "people",
+   "prompt": "who's Jeremy again",
+   "expect": [
+    [
+     579,
+     35,
+     182
+    ]
+   ],
+   "stale": [],
+   "verified": "store",
+   "note": ""
+  },
+  {
+   "id": "ppl-gate-owner",
+   "category": "people",
+   "prompt": "who owns the coverage gate pipeline templates",
+   "expect": [
+    [
+     2635
+    ]
+   ],
+   "stale": [],
+   "verified": "store",
+   "note": ""
+  },
+  {
+   "id": "ppl-jen",
+   "category": "people",
+   "prompt": "what does Jen work on",
+   "expect": [
+    [
+     626
+    ]
+   ],
+   "stale": [],
+   "verified": "store",
+   "note": "person kind, work volatility"
+  },
+  {
+   "id": "ppl-human-threads",
+   "category": "people",
+   "prompt": "should you reply to Tim's review comment",
+   "expect": [
+    [
+     3721,
+     1462,
+     287
+    ]
+   ],
+   "stale": [],
+   "verified": "owner: global CLAUDE.md 'Human reviewers: John replies, Claude doesn't'",
+   "note": "",
+   "also_ok": [
+    2731,
+    3788
+   ]
+  },
+  {
+   "id": "ppl-john-adhd",
+   "category": "people",
+   "prompt": "how should I write up the questions for John",
+   "expect": [
+    [
+     584
+    ]
+   ],
+   "stale": [],
+   "verified": "owner: global CLAUDE.md",
+   "note": "should come from the session core",
+   "also_ok": [
+    2187
+   ]
+  },
+  {
+   "id": "ppl-dictation",
+   "category": "people",
+   "prompt": "John wrote 'Stakekeeper', what does he mean",
+   "expect": [
+    [
+     340,
+     1825
+    ]
+   ],
+   "stale": [],
+   "verified": "owner: global CLAUDE.md dictation note (#340 / #1825)",
+   "note": "real garble seen 2026-11-20"
+  },
+  {
+   "id": "unk-eonasdan",
+   "category": "unknown-unknown",
+   "prompt": "is the Eonasdan thing gone from prod",
+   "expect": [
+    [
+     4000,
+     4001,
+     1619,
+     29,
+     3116
+    ]
+   ],
+   "stale": [
+    1448
+   ],
+   "verified": "gh: 3340 (removes Eonasdan, CRM-3087) MERGED 2026-11-18, not in build 13801 (store #4001)",
+   "note": "the library name instead of the feature name"
+  },
+  {
+   "id": "unk-last-release",
+   "category": "unknown-unknown",
+   "prompt": "what went out in the last prod release",
+   "expect": [
+    [
+     4000,
+     3997
+    ]
+   ],
+   "stale": [],
+   "verified": "store: #4000 build 13801; #3997 identity migration applied 2026-11-18",
+   "note": "no entity named; answer is under a build number"
+  },
+  {
+   "id": "unk-blocked-on-me",
+   "category": "unknown-unknown",
+   "prompt": "is anything stuck waiting on me",
+   "expect": [
+    [
+     4022,
+     4023
+    ]
+   ],
+   "stale": [],
+   "verified": "file: C:/repos/work-board/scripts/install-supervisor-task.ps1 exists",
+   "note": "the answer today lives only in the working note and these two states"
+  },
+  {
+   "id": "unk-permissions-donor",
+   "category": "unknown-unknown",
+   "prompt": "what's up with letting anyone in the org see the donor receipts",
+   "expect": [
+    [
+     3446,
+     840,
+     3822,
+     3532
+    ]
+   ],
+   "stale": [
+    3490
+   ],
+   "verified": "gh: PR 3349 draft; #3446 is H4",
+   "note": "paraphrase of receipting permissions"
+  },
+  {
+   "id": "unk-where-receipting-permissions",
+   "category": "unknown-unknown",
+   "prompt": "where are we on receipting permissions",
+   "expect": [
+    [
+     840,
+     3822,
+     3446,
+     3532,
+     3703
+    ]
+   ],
+   "stale": [
+    3490
+   ],
+   "verified": "gh: PR 3349 OPEN draft",
+   "note": "John's example prompt; today's hook returns H4 finding + generic jobs states but not the PR state"
+  },
+  {
+   "id": "unk-kill-switch",
+   "category": "unknown-unknown",
+   "prompt": "is there a kill switch for the sweeper",
+   "expect": [
+    [
+     66,
+     3299
+    ]
+   ],
+   "stale": [],
+   "verified": "owner: John's decision 2026-11-12 (#66)",
+   "note": "",
+   "also_ok": [
+    3274
+   ]
+  },
+  {
+   "id": "unk-user-logins-migration",
+   "category": "unknown-unknown",
+   "prompt": "did the index migration on the logins table run in prod",
+   "expect": [
+    [
+     3997,
+     3999
+    ]
+   ],
+   "stale": [],
+   "verified": "store: applied and verified by John 2026-11-18",
+   "note": ""
+  },
+  {
+   "id": "unk-old-memory",
+   "category": "unknown-unknown",
+   "prompt": "what happened to the old memory system",
+   "expect": [
+    [
+     4006,
+     4002,
+     4004
+    ]
+   ],
+   "stale": [],
+   "verified": "file: local/cutover/rollback_cutover.ps1 exists",
+   "note": ""
+  },
+  {
+   "id": "unk-decomposed-recall",
+   "category": "unknown-unknown",
+   "prompt": "do we recall from the fragments or from the decomposed states",
+   "expect": [
+    [
+     4007
+    ]
+   ],
+   "stale": [],
+   "verified": "store: #4007",
+   "note": "real failure 2026-11-20: first prompt about Statekeeper recall returned 'receipting plan fragments' (#3266, id coincidence with the PR number) and 'Persistence working model'"
+  },
+  {
+   "id": "unk-receipt-user-context",
+   "category": "unknown-unknown",
+   "prompt": "whose permissions do the receipting jobs run under",
+   "expect": [
+    [
+     3526
+    ]
+   ],
+   "stale": [],
+   "verified": "store: #3526 (2026-11-16 review); PR 3349 is about changing exactly this",
+   "note": ""
+  }
+ ]
+}

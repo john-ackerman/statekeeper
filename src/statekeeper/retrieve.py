@@ -454,7 +454,11 @@ def select(store: Store, text: str, embedder: Optional[Embedder], *, floor: floa
     # generic, a ticket or a customer project is specific
     standing_count: dict[int, int] = {}
     own_count: dict[int, int] = {}
-    for s in pool:
+    # the bulk-imported, unreviewed tier is hidden from every statistic below (counts, mentions, word rarity): thousands of old-conversation
+    # states must not turn a specific thing generic or a rare word common
+    tier = {s.id for s in pool if name_only(s)}
+    counted = [s for s in pool if s.id not in tier]
+    for s in counted:
         own_count[s.thing_id] = own_count.get(s.thing_id, 0) + 1
         for tid in {s.thing_id, s.object_id} - {None}:
             standing_count[tid] = standing_count.get(tid, 0) + 1
@@ -502,9 +506,9 @@ def select(store: Store, text: str, embedder: Optional[Embedder], *, floor: floa
     mentioned_widely: set[int] = set()
     for tid, (thing, _why, _score) in named.items():
         if texts is None:
-            texts = [words(split_identifiers(s.text)) for s in pool]
+            texts = [words(split_identifiers(s.text)) for s in counted]
         label = split_identifiers(thing.name)
-        if sum(1 for w in texts if occurrences(w, label) > 0) > max(GENERIC_MENTIONS, len(pool) // 50):
+        if sum(1 for w in texts if occurrences(w, label) > 0) > max(GENERIC_MENTIONS, len(counted) // 50):
             mentioned_widely.add(tid)
     query = None
     cos: dict[int, float] = {}
@@ -549,9 +553,10 @@ def select(store: Store, text: str, embedder: Optional[Embedder], *, floor: floa
     for s in pool:
         st = terms(f"{s.thing_name} {s.text}")
         state_terms[s.id] = st
-        for w in st:
-            df[w] = df.get(w, 0) + 1
-    rare_cut = max(3, len(pool) // 100)
+        if s.id not in tier:
+            for w in st:
+                df[w] = df.get(w, 0) + 1
+    rare_cut = max(3, len(counted) // 100)
     name_words = {w for tid in named for w in words(split_identifiers(named[tid][0].name))}
     asked = {w for w in terms(text) if df.get(w, 0) <= rare_cut and w not in name_words}
 
@@ -695,6 +700,10 @@ def select(store: Store, text: str, embedder: Optional[Embedder], *, floor: floa
             best[s.id] = (score, s)
     scored = list(best.values())
     scored.sort(key=lambda x: (-x[0], x[1].id))
+    # the unreviewed tier ranks below everything else and takes part in none of the replacements below (a newer imported note must not hide a
+    # standing one): it only fills what is left after every other qualifying state
+    lowest = [(sc, s) for sc, s in scored if s.id in tier]
+    scored = [(sc, s) for sc, s in scored if s.id not in tier]
     # newer facts about the same subject replace older ones at injection time
     by_thing: dict[int, list[State]] = {}
     for _, s in scored:
@@ -763,7 +772,8 @@ def select(store: Store, text: str, embedder: Optional[Embedder], *, floor: floa
                     reasons[d.id] = {**reasons.get(s.id, {}), "retired_over": s.id}
                     seen_decl.add(d.id)
             scored = merged
-    kept = scored
+    shown_ids = {s.id for _, s in scored}
+    kept = scored + [(min(sc, 0.01), s) for sc, s in lowest if s.id not in shown_ids]
     items: dict[int, Item] = {}
     order: list[int] = []
     for score, s in kept:

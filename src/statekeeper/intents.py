@@ -19,6 +19,20 @@ WAITING_HOURS = 72          # a "pending for John" note older than this (vs the 
 RELEASE_STATES = 2
 
 
+ASKS = re.compile(r"\b(open|pending|outstanding|my|the|which|what|any|all|priority|order|list|board)\b[\w\s']{0,40}?\basks\b|"
+                  r"\basks\b[\w\s']{0,20}?\b(open|pending|outstanding|priority|order|list|board|left|waiting)\b", re.I)
+ASKS_MAX = 8
+
+
+def open_asks(pool: list, text: str) -> list:
+    """For "what is the priority order of asks" / "which asks are open": the open board asks' current values, newest first. 'asks' as a verb
+    ("he asks a lot") does not match."""
+    if not ASKS.search(text):
+        return []
+    found = [s for s in pool if s.state_key == "ask.state" and s.status == "active" and s.text.startswith("open")]
+    return sorted(found, key=lambda s: (s.text.split(" · since ")[-1][:10], s.id), reverse=True)[:ASKS_MAX]
+
+
 def _at(ts: str) -> datetime:
     return datetime.fromisoformat(ts[:19].replace(" ", "T")).replace(tzinfo=timezone.utc)
 

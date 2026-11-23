@@ -540,6 +540,14 @@ def select(store: Store, text: str, embedder: Optional[Embedder], *, floor: floa
             if own is not None and own[1] == "named":  # a named thing's current values; never reached by meaning alone (they are short labels)
                 scored.append((2.0, s))
                 reasons[s.id] = {"via": "keyed", "thing": t.name}
+            elif s.state_key == "ask.state" and s.id not in meaning_off:
+                # an ask is named by an opaque id, but its value carries a title: it may reach an input by its title's meaning or two of its rare words
+                fold = lambda ws: {w[:-1] if w.endswith("s") and len(w) > 5 else w for w in ws}   # "rollouts" says "rollout"
+                title_words = sorted(fold(terms(text)) & fold(terms(s.text.split(" · ", 3)[-1])))[:4]
+                if (c is not None and c >= floor) or len(title_words) >= 2:
+                    scored.append((max(c or 0.0, floor), s))
+                    reasons[s.id] = {"via": "meaning" if c is not None and c >= floor else "words", "thing": t.name,
+                                     **({"words": title_words} if title_words else {})}
             continue
         shared_words = sorted(asked & state_terms.get(s.id, set()))[:4]
         base = {"cos": round(raw, 3) if raw is not None else None, **({"weight": weights[s.id]} if s.id in weights else {})}
@@ -581,7 +589,11 @@ def select(store: Store, text: str, embedder: Optional[Embedder], *, floor: floa
             reasons[s.id] = {"via": "rollup", "thing": s.thing_name}
             rolled.add(s.thing_id)
     if INTENTS:
-        from .intents import asks_ship, latest_release, waiting_on_john
+        from .intents import asks_ship, latest_release, open_asks, waiting_on_john
+        for s in open_asks(pool, text):
+            scored.append((1.85, s))                                  # "what is the priority order of asks": the open asks on the board
+            reasons[s.id] = {"via": "rollup", "thing": s.thing_name}
+            rolled.add(s.thing_id)
         if asks_ship(text):
             for s in latest_release(pool):
                 scored.append((1.6, s))                               # "did X ship": what the newest release says, beside X's own state

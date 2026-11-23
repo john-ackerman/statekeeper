@@ -1,0 +1,30 @@
+{
+  "_readme": "The 10 sample prompts of the 2026-11-23 Statekeeper audit (C:/repos/_handoffs/statekeeper-audit-20261123.md section 2), as a regression set for eval/run_eval.py. Ids are from the snapshot shadow-20261123-105033.db (a verified backup of the live store, kept outside git); run with --db pointing at it. Tune only against this set and eval/cases.json, never by feel. 'expect' is a list of groups (any id of a group satisfies it); 'stale' lists states that must NOT be injected.",
+  "snapshot": "shadow-20261123-105033.db",
+  "cases": [
+    {"id": "audit-crm3148-prince", "category": "live-ask", "prompt": "CRM-3148 Prince", "expect": [[4436]], "stale": [683, 3575],
+     "verified": "board: ask 4436 'CRM-3148 Prince security: NOT closable ... pick order' open today; #683 'has not started' (11-16) and #3575 'left as filed' are overtaken history",
+     "note": "audit miss 1: the live ask lost to undated decomposed history"},
+    {"id": "audit-repair-guard", "category": "decision", "prompt": "receipting repair guard 120 days", "expect": [[3645, 3219, 3779, 4506]], "stale": [4439],
+     "verified": "#3645 guard behind flag receipting-repair-requires-rendered; #3219 guard = CRM-3052; #3779 PR #3376 (CRM-3052); #4506 John deferred the 120-day repair-rule choice (imported 2026-11-23 from Persistence fact 801); #4439 is a 'gone' ask",
+     "note": "audit miss 2: short prompt under the 0.78 floor got nothing"},
+    {"id": "audit-launchdarkly-rollout", "category": "live-ask", "prompt": "LaunchDarkly flag rollout", "expect": [[4435], [2522, 2523]], "stale": [543],
+     "verified": "#4435 open ask 'Plan the LaunchDarkly flag rollouts'; #2522/#2523 how to read flag state; #543 unreviewed duplicate of #2233",
+     "note": "audit miss 3"},
+    {"id": "audit-pr3320-merge", "category": "live-pr", "prompt": "PR 3320 merge", "expect": [[906, 1473, 4459, 4477]], "stale": [4233],
+     "verified": "PR 3320 keyed state/review/CI and the open auto-merge ask #4477; #4233 is the 'gone' auto-rerun ask (stale 70h in the audit)",
+     "note": "audit: useful, but a gone ask leaked"},
+    {"id": "audit-blank-pdf", "category": "howto", "prompt": "blank PDF receipt run", "expect": [[2909]], "stale": [],
+     "verified": "#2909 blank page 2 caused by fonts (partly relevant)", "note": "audit: nothing surfaced"},
+    {"id": "audit-ask-priority", "category": "live-ask", "prompt": "what is the priority order of asks", "expect": [[4436, 4435, 4166, 4257, 4434, 4475, 4417, 4477]], "stale": [],
+     "verified": "open board asks in the snapshot", "note": "audit: the answer is the board's ask list (live data); any open ask counts"},
+    {"id": "audit-statement-jobs", "category": "live-ask", "prompt": "statement jobs finished state", "expect": [[4438]], "stale": [],
+     "verified": "#4438 ask 'CRM-1349 statement jobs always end finished' (done in the snapshot)", "note": "audit miss"},
+    {"id": "audit-work-board", "category": "guard", "prompt": "show me the work board", "expect": [], "stale": [],
+     "verified": "lanes and asks are live data, not states; anything injected is noise", "note": "noise guard"},
+    {"id": "audit-watcher", "category": "live-ask", "prompt": "is the watcher running", "expect": [[4422]], "stale": [],
+     "verified": "#4422 work-board watcher: running, heartbeat 0m ago", "note": "audit miss"},
+    {"id": "audit-agents", "category": "guard", "prompt": "how are the agents doing", "expect": [], "stale": [],
+     "verified": "answered by the Agents line (not a state id); stored states here are noise", "note": "noise guard; the agents line is not scored"}
+  ]
+}

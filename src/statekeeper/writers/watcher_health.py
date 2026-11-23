@@ -12,12 +12,13 @@ import urllib.request
 from pathlib import Path
 from typing import Callable, Optional
 
-from ..store import Evidence, Store
+from ..store import Evidence, Store, StoreError
 from .common import observe_keyed
 
 WRITER = "observer:watcher-health"
 THING = "work-board watcher"
 PARENT = "work-board"
+ALIAS = "watcher"
 FRESH_MIN = 20        # the watcher beats every few minutes; older than this while not paused means it is not running
 DEAD_MIN = 180
 
@@ -78,4 +79,9 @@ def observe_watcher(store: Store, *, directory: Optional[Path] = None, server_up
     ev = Evidence("tool", str(d / "orch-watch-heartbeat"), text[:300])
     r = observe_keyed(store, writer=WRITER, thing=THING, parent=PARENT, observations={"watcher.status": text}, evidence=ev,
                       handle="bash C:/repos/work-board/scripts/board.sh health --json", as_of=None)
+    if store.find(ALIAS) is None:
+        try:                                                        # "is the watcher running": people say the short name
+            store.add_alias(THING, ALIAS, "what people call it", actor=WRITER)
+        except StoreError:
+            pass                                                    # the word already names something else: leave it
     return {"changed": r["changed"]}

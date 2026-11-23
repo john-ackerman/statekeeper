@@ -21,6 +21,15 @@ beside "board watcher"); un-naming a name said inside a longer name even when it
 dec-docraptor-removal and dec-receipt-model lenient hits) or when the longer name was only resolved from a number ("PR 3266" vs "VirtuousV2 PR
 3266" from "CI for 3266" lost pr-3266-ci and pr-3313-copilot).
 
+Full conversation import on the live store (2026-11-23 12:30-14:11, after the ff to 116256f and `reparent --apply`: 564 moves, 3 merges):
+2509 fragments, 4656 states written, 3238 corroborations (the fragment added as evidence), $8.76. **Recall got worse** (copies before/after):
+cases.json hook hit@all 0.509 -> 0.382, recall 0.582 -> 0.473; audit recall hit@1 rose 0.308 -> 0.385 but hook hit@all stayed 0.385. The 60-sample had
+not shown it. Cause seen in the misses: identifier-only states on numbered things ("#3337, #3338 and #3340", "Build 7.15.95.13801") count as
+specific named states (score 1.0+) and displace the keyed and standing states for the same number ("is 3340 in prod yet", "last prod release");
+"board watcher" went empty. All 4656 imported states were closed (reason "conversation import held back ...", `reopen` restores them); after the
+close: hook hit@all 0.509, recall 0.564 (remaining gap is live drift: two asks closed by the board writer in between, and one how-to swap).
+Next attempt needs the name-only tier to rank below every non-imported state of the same thing and never take a cap slot from one.
+
 ## 2026-11-20 recall-dev (sk-improve agent)
 
 Branch `recall-dev`, commits 8483041..7db1aed on top of 00cd05c (the baseline as found). Old `main` was 279e0c0.

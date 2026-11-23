@@ -9,6 +9,21 @@ from typing import Callable
 
 from ..store import Evidence, Store, now
 
+NOT_OBSERVED = "no longer observed"
+
+
+def close_unobserved(store: Store, *, writer: str, seen: set[str], prefix: str | None = None, reason: str = NOT_OBSERVED) -> list[str]:
+    """Closes (kept as history, with `reason`) the standing states `writer` wrote on things it did not see this run, so a value nobody re-reads stops
+    standing as current. Only that writer's states, on things whose name starts with `prefix` when given. Call it only after a COMPLETE read of the
+    source: a failed or partial read must close nothing. Returns the names of the things closed."""
+    closed: set[str] = set()
+    for s in store.searchable_states():
+        if s.writer != writer or s.status != "active" or s.thing_name in seen or (prefix and not s.thing_name.startswith(prefix)):
+            continue
+        store.close_state(s.id, reason, actor=writer)
+        closed.add(s.thing_name)
+    return sorted(closed)
+
 
 def observe_keyed(store: Store, *, writer: str, thing: str, parent: str | None, observations: dict[str, str], evidence: Evidence, handle: str,
                   as_of: str | None, clock: Callable[[], str] = now, volatility: str = "live") -> dict:

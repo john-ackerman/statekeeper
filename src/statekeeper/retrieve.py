@@ -94,6 +94,19 @@ class Surfaced:
     named: list[int] = field(default_factory=list)   # things the input named whole (feeds the conversation-topic signal)
 
 
+def live_age_hours(s: State, today: datetime) -> float:
+    """Hours since a state was last read (verified) or, never re-read, written; unreadable timestamps count as very old."""
+    try:
+        return (today - datetime.fromisoformat((s.confirmed_utc or s.recorded_utc)[:19]).replace(tzinfo=timezone.utc)).total_seconds() / 3600
+    except (ValueError, TypeError):
+        return 1e9
+
+
+def stale_live(s: State, today: datetime) -> bool:
+    """A live value (not the owner's word) that nobody has re-read within LIVE_STALE_HOURS: it must not be shown as current."""
+    return s.volatility == "live" and s.trust != "owner" and live_age_hours(s, today) > LIVE_STALE_HOURS
+
+
 def _freshness(s: State, today: datetime) -> str:
     """ONE short marker for how far to trust a state right now."""
     def days(ts: Optional[str]) -> Optional[int]:
@@ -106,10 +119,7 @@ def _freshness(s: State, today: datetime) -> str:
     verified = days(s.confirmed_utc)
     if s.volatility == "live" and s.trust != "owner":
         # a live state (a build, a PR's CI, an agent's status) goes stale in hours: say so, and how to re-check, rather than state it as current
-        try:
-            age_h = (today - datetime.fromisoformat((s.confirmed_utc or s.recorded_utc)[:19]).replace(tzinfo=timezone.utc)).total_seconds() / 3600
-        except ValueError:
-            age_h = 1e9
+        age_h = live_age_hours(s, today)
         if age_h > LIVE_STALE_HOURS:
             how = f"; re-check: {s.verify_handle[:60]}" if s.verify_handle else ""
             return f"STALE, last verified {int(age_h)}h ago{how}" if s.confirmed_utc else f"STALE, never re-verified{how}"
@@ -327,7 +337,8 @@ def candidates(store: Store, text: str, embedder: Optional[Embedder], floor: flo
 
 def select(store: Store, text: str, embedder: Optional[Embedder], *, floor: float, max_things: int = 3, states_each: int = 2,
            exclude_kinds: tuple = (), exclude_names: tuple = (), skip_state_ids: frozenset = frozenset(), max_states: int = MAX_STATES,
-           topic: Optional[dict[int, float]] = None, info: Optional[dict] = None, news: frozenset = frozenset()) -> tuple[list[Item], list[State], list[Item]]:
+           topic: Optional[dict[int, float]] = None, info: Optional[dict] = None, news: frozenset = frozenset(),
+           today: Optional[datetime] = None) -> tuple[list[Item], list[State], list[Item]]:
     """State-first selection: every state shown must itself bear on the input, not merely belong to a thing whose name was said.
 
     A state qualifies when
@@ -345,6 +356,7 @@ def select(store: Store, text: str, embedder: Optional[Embedder], *, floor: floa
     meaning score by at most a few hundredths: a state shown again and again and never used, or said to be noise, needs to be a little closer.
     Returns (items shown, all qualifying states in rank order, items dropped by the caps); `info`, when given, receives the named thing ids."""
     standing_all = store.searchable_states()
+    today = today or datetime.now(timezone.utc)
     ids = None
     if IDENTIFIERS:
         from .identifiers import IdentifierIndex
@@ -481,6 +493,8 @@ def select(store: Store, text: str, embedder: Optional[Embedder], *, floor: floa
         own = named.get(s.thing_id) if s.thing_id not in cut else None
         obj = named.get(s.object_id) if s.object_id and s.object_id not in cut else None
         hit = own or obj
+        if (own is None or own[1] != "named") and stale_live(s, today):
+            continue                                                  # a live value nobody re-read lately is not current: only naming its thing shows it (marked STALE)
         if s.id in meaning_off:
             c = None                                                  # surfaces only through its own name
         why_named = (lambda h: {"via": h[1].split()[0], "thing": h[0].name})
@@ -747,7 +761,8 @@ def surface(store: Store, text: str, embedder: Optional[Embedder] = None, *, flo
     floor = store.get_param("relevance_floor", DEFAULT_FLOOR) if floor is None else floor
     info: dict = {}
     items, _, dropped = select(store, text, embedder, floor=floor, max_things=max_things, states_each=states_each, exclude_kinds=exclude_kinds,
-                               exclude_names=exclude_names, skip_state_ids=skip_state_ids, max_states=max_states, topic=topic, info=info, news=news)
+                               exclude_names=exclude_names, skip_state_ids=skip_state_ids, max_states=max_states, topic=topic, info=info, news=news,
+                               today=today)
     named = info.get("named", [])
     agents, agent_ids = _agents_line(store, text, today, skip_state_ids)
     if not items and not agents:

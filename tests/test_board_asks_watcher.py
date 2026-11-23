@@ -35,13 +35,13 @@ class BoardAsks(unittest.TestCase):
         self.assertIsNone(self.s.find("board ask a2"))
         self.assertNotIn("SECRET", cur(self.s, "board ask a1", "ask.state"))
 
-    def test_a_reread_confirms_and_a_done_or_removed_ask_gets_its_final_value_once(self):
+    def test_a_reread_confirms_a_done_ask_gets_its_final_value_once_and_a_removed_one_is_closed(self):
         observe_board_asks(self.s, [ask("a1"), ask("a3")])
         again = observe_board_asks(self.s, [ask("a1"), ask("a3")])
         self.assertEqual([], again["changed"])
         observe_board_asks(self.s, [ask("a1", done=True)])                 # a1 done, a3 removed from the board
         self.assertTrue(cur(self.s, "board ask a1", "ask.state").startswith("done"))
-        self.assertTrue(cur(self.s, "board ask a3", "ask.state").startswith("gone"))
+        self.assertIsNone(cur(self.s, "board ask a3", "ask.state"))       # closed: no longer observed (test_unobserved.py)
 
     def test_the_cap_keeps_the_newest_open_asks(self):
         asks = [ask(f"x{i}", created=f"2026-11-{10 + i % 9:02d}T00:00:00Z") for i in range(60)]

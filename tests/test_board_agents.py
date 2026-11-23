@@ -53,7 +53,7 @@ class WhatsRunning(unittest.TestCase):
         s = fresh_store()
         now = datetime.now(timezone.utc)                                 # the roll-up reads the wall clock, so the heartbeats must be recent to it
         observe_board_agents(s, [agent("build-3349", "running", now=now), agent("done-one", "running", now=now)], clock=lambda: now)
-        observe_board_agents(s, [agent("done-one", "reported", now=now)], clock=lambda: now)
+        observe_board_agents(s, [agent("build-3349", "running", now=now), agent("done-one", "reported", now=now)], clock=lambda: now)   # a read is the full list
         s.add_state("Build 7.15.95.13801", "Build 7.15.95.13801 has shipped.", evidence=[ev()], writer="w", trust="verified", learned_how="read")
         s.add_state("install-supervisor-task.ps1", "Installing the supervisor task is pending for John.", evidence=[ev()], writer="w", trust="verified",
                     learned_how="read")

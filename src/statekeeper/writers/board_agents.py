@@ -14,7 +14,7 @@ from datetime import datetime, timezone
 from typing import Callable, Optional
 
 from ..store import Evidence, Store
-from .common import observe_keyed
+from .common import close_unobserved, observe_keyed
 
 WRITER = "observer:board-agents"
 PARENT = "board agents"
@@ -51,6 +51,7 @@ def observe_board_agents(store: Store, agents: list[dict], *, clock: Callable[[]
     compared for change (it would change on every read): only state/role/card are; the age is refreshed in the text when those change."""
     now = clock()
     out = {"agents": 0, "changed": []}
+    written: set[str] = set()
     for a in agents:
         aid = a.get("id") or a.get("name")
         if not aid:
@@ -75,4 +76,8 @@ def observe_board_agents(store: Store, agents: list[dict], *, clock: Callable[[]
                           handle=f"bash C:/repos/work-board/scripts/board.sh agent-get {aid}", as_of=None)
         out["agents"] += 1
         out["changed"] += [f"{aid}:{k}" for k in r["changed"]]
+        written.add(thing)
+    # a known agent the board no longer reports (removed, or ended more than RECENT_HOURS ago): its last value is closed, not kept as current
+    for name in close_unobserved(store, writer=WRITER, seen=written, prefix="board agent "):
+        out["changed"].append(f"{name[len('board agent '):]}:closed")
     return out

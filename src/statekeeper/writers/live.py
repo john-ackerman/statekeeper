@@ -13,9 +13,10 @@ from typing import Callable
 from .. import config
 from ..proc import run
 from ..store import Store
-from .ado_build import fetch_latest, observe_build
-from .agent_status import observe_agent, status_from_transcript
-from .github_pr import fetch as fetch_pr, observe_pr
+from .ado_build import WRITER as BUILD_WRITER, fetch_latest, observe_build
+from .agent_status import WRITER as AGENT_WRITER, observe_agent, status_from_transcript
+from .common import close_unobserved
+from .github_pr import WRITER as PR_WRITER, fetch as fetch_pr, observe_pr
 
 def list_open_prs(repo: str) -> list[int]:
     r = run(["gh", "pr", "list", "--repo", repo, "--author", "@me", "--state", "open", "--json", "number", "--limit", "60"],
@@ -57,12 +58,15 @@ def observe_everything(store: Store, *, repos=None, build_repos=None, list_prs: 
     not running is quiet for asks (the watcher state says so); other failures are recorded, never fatal."""
     repos = config.get_list("github_repos") if repos is None else repos
     build_repos = config.get_list("build_repos") if build_repos is None else build_repos
-    result = {"prs": 0, "builds": 0, "agents": 0, "errors": []}
+    result = {"prs": 0, "builds": 0, "agents": 0, "errors": [], "closed": []}
+    builds_seen: set[str] = set()
+    builds_complete = bool(build_repos)
     for repo in repos:
         try:
             numbers = list_prs(repo)
         except Exception as e:
             result["errors"].append(f"list {repo}: {str(e)[:120]}")
+            builds_complete = builds_complete and repo.split("/")[-1] not in build_repos
             continue
         name = repo.split("/")[-1]
         # PRs the store still holds as open that the open list no longer has were merged or closed: read them once more so they stop reading "open"
@@ -78,16 +82,29 @@ def observe_everything(store: Store, *, repos=None, build_repos=None, list_prs: 
                 try:
                     b = get_build(f"refs/pull/{n}/merge")
                     if b:
-                        observe_build(store, b)
+                        builds_seen.add(observe_build(store, b)["build.state"].thing_name)
                         result["builds"] += 1
                 except Exception as e:
+                    builds_complete = False
                     result["errors"].append(f"build #{n}: {str(e)[:120]}")
+        # this repo was listed completely: a PR of it that was neither open nor held open had its last read earlier, so its values close
+        # (a PR whose read failed above still counts as seen)
+        result["closed"] += close_unobserved(store, writer=PR_WRITER, seen={f"{name} PR {n}" for n in numbers}, prefix=f"{name} PR ")
+    if builds_complete:
+        result["closed"] += close_unobserved(store, writer=BUILD_WRITER, seen=builds_seen)     # only the newest build of each open PR stands
+    agents_seen: set[str] = set()
+    agents_complete = transcripts is not None
     for t in transcripts or []:
         try:
-            observe_agent(store, status_from_transcript(t))
+            p = status_from_transcript(t)
+            observe_agent(store, p)
+            agents_seen.add(p["agent"])
             result["agents"] += 1
         except Exception as e:
+            agents_complete = False
             result["errors"].append(f"agent {t.name}: {str(e)[:120]}")
+    if agents_complete:
+        result["closed"] += close_unobserved(store, writer=AGENT_WRITER, seen=agents_seen)   # no transcript activity in the window: not current
     if get_board_agents is not None:
         from .board_agents import observe_board_agents
         try:

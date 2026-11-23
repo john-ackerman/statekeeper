@@ -1,8 +1,8 @@
 """Open asks on John's work board (http://127.0.0.1:7788/api/asks), read only, written as keyed `ask.state` states.
 
 One thing per ask ("board ask <id>") with one keyed value, e.g. "open · decide · since 2026-11-16 · CRM-3151 Lob webhook signing ...": title only (never the
-body), capped. The value carries the creation date, not an age, so a re-read of an unchanged ask only confirms. An ask that gets done, or disappears from the
-board, gets its final value once ("done" / "gone"), so the what's-running roll-up stops listing it by itself.
+body), capped. The value carries the creation date, not an age, so a re-read of an unchanged ask only confirms. An ask that gets done gets its final value
+once ("done"); one the board no longer lists is closed ("no longer observed"), so nothing about it stands as current.
 """
 from __future__ import annotations
 
@@ -13,7 +13,7 @@ from datetime import datetime, timezone
 from typing import Callable, Optional
 
 from ..store import Evidence, Store
-from .common import observe_keyed
+from .common import close_unobserved, observe_keyed
 
 WRITER = "observer:board-asks"
 PARENT = "board asks"
@@ -57,15 +57,7 @@ def observe_board_asks(store: Store, asks: list[dict], *, clock: Callable[[], da
         if state == "open":
             out["open"] += 1
         out["changed"] += [f"{a['id']}:{k}" for k in r["changed"]]
-    # asks the store holds as open that the board no longer lists (removed): say so once
-    for t in store.things():
-        if t.retired or not t.name.startswith(PREFIX) or t.name[len(PREFIX):] in seen:
-            continue
-        cur = [s for s in store.states_of(t.id) if s.state_key == "ask.state" and s.status == "active"]
-        if cur and cur[0].text.startswith("open"):
-            gone = "gone" + cur[0].text[len("open"):]
-            ev = Evidence("tool", "board /api/asks", "ask no longer listed")
-            r = observe_keyed(store, writer=WRITER, thing=t.name, parent=PARENT, observations={"ask.state": gone}, evidence=ev,
-                              handle="curl -s http://127.0.0.1:7788/api/asks", as_of=None)
-            out["changed"] += [f"{t.name[len(PREFIX):]}:{k}" for k in r["changed"]]
+    # asks the board no longer lists (removed, or done and cleared): their value is closed, so nothing stands as current for them
+    for name in close_unobserved(store, writer=WRITER, seen={PREFIX + i for i in seen}, prefix=PREFIX):
+        out["changed"].append(f"{name[len(PREFIX):]}:closed")
     return out

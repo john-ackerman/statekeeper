@@ -73,9 +73,15 @@ def residue(label: str) -> str:
 class IdentifierIndex:
     """number -> things carrying it (split by ticket vs not), and residue phrase -> the one PR number it stands for."""
 
-    def __init__(self, labels: Iterable[tuple[int, str]], state_texts: Optional[list[str]] = None):
+    def __init__(self, labels: Iterable[tuple[int, str]], state_texts: Optional[list[str]] = None,
+                 live_values: Iterable[tuple[int, str]] = ()):
+        """`live_values`: (thing id, text) of current keyed live values (an ask's title, an agent's card). A number they carry names that thing too,
+        so "CRM-3148" reaches the open ask "board ask ask-2026..." whose title says it. Ordinary states' numbers never name their thing."""
         self.by_number: dict[str, dict[bool, set[int]]] = {}
         phrase_numbers: dict[str, set[str]] = {}
+        for tid, text in live_values:
+            for n, crm in numbers_in_text(text):
+                self.by_number.setdefault(n, {True: set(), False: set()})[crm].add(tid)
         for tid, label in labels:
             for n, crm in numbers_in_text(label):
                 self.by_number.setdefault(n, {True: set(), False: set()})[crm].add(tid)

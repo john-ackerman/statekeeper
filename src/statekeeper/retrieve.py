@@ -360,7 +360,8 @@ def select(store: Store, text: str, embedder: Optional[Embedder], *, floor: floa
     ids = None
     if IDENTIFIERS:
         from .identifiers import IdentifierIndex
-        ids = IdentifierIndex(store.labels(), [" ".join(words(f"{s.thing_name} {s.text}")) for s in standing_all])
+        ids = IdentifierIndex(store.labels(), [" ".join(words(f"{s.thing_name} {s.text}")) for s in standing_all],
+                              live_values=[(s.thing_id, s.text) for s in standing_all if s.state_key and s.volatility == "live" and s.status == "active"])
     named = _named(store, text, exclude_kinds, exclude_names, ids)
     by_number = getattr(ids, "resolved", set()) if ids is not None else set()
     topic = topic or {}

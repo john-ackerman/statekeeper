@@ -56,6 +56,39 @@ class Surfacing(unittest.TestCase):
         self.assertEqual(sum(1 for t in ("not included", "reviewed twice") if t in out.block), 1)
 
 
+class LiveKeys(unittest.TestCase):
+    """A ticket key or PR number said in the input reaches the live thing whose current value carries it (an ask, an agent's card), even when the
+    thing's own name is an opaque id, and that value ranks above meaning hits."""
+
+    def setUp(self):
+        self.s = fresh_store()
+
+    def live(self, thing, key, text, writer="observer:board-asks"):
+        return self.s.add_state(thing, text, evidence=[ev(f"l-{thing}", text)], writer=writer, trust="verified", learned_how="read",
+                                state_key=key, volatility="live")
+
+    def test_a_ticket_key_in_an_open_asks_title_names_the_ask(self):
+        a = self.live("board ask ask-20261123155629-6e62", "ask.state", "open · decide · since 2026-11-23 · CRM-3148 NOT closable, 4 remaining PRs, pick order")
+        self.s.add_state("Prince", "Running Prince as non-root for CRM-3148 is still open", evidence=[ev()], writer="w", trust="derived", learned_how="inferred")
+        out = surface(self.s, "CRM-3148 Prince", None)
+        self.assertIn(f"#{a.id}", out.block)
+        self.assertLess(out.block.index(f"#{a.id}"), out.block.index("non-root") if "non-root" in out.block else len(out.block))
+
+    def test_a_pr_number_on_an_agents_card_names_the_agent(self):
+        a = self.live("board agent build-77", "agent.status", "running · builder · card PR-3349 · beat 5m ago", writer="observer:board-agents")
+        self.assertIn(f"#{a.id}", surface(self.s, "how is PR 3349 going", None).block)
+
+    def test_a_number_in_an_ordinary_state_does_not_make_its_thing_named(self):
+        self.s.add_state("Prince", "Prince loopback bypass was measured for CRM-3182", evidence=[ev()], writer="w", trust="derived", learned_how="inferred")
+        self.s.add_state("Prince", "Prince renders fonts from the image", evidence=[ev("x")], writer="w", trust="derived", learned_how="inferred")
+        self.assertNotIn("fonts from the image", surface(self.s, "CRM-3182", None).block)
+
+    def test_a_closed_ask_is_not_named_by_its_number(self):
+        a = self.live("board ask ask-1", "ask.state", "open · decide · since 2026-11-20 · CRM-4001 pick the default")
+        self.s.close_state(a.id, "no longer observed", actor="observer:board-asks")
+        self.assertEqual("", surface(self.s, "CRM-4001", None).block)
+
+
 class People(unittest.TestCase):
     def setUp(self):
         self.s = fresh_store()

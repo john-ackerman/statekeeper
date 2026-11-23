@@ -207,3 +207,18 @@ class MigratingAnEarlierDatabase(unittest.TestCase):
             self.assertIsNone(s.db.execute("SELECT 1 FROM sqlite_master WHERE name = 'shadow_injections_old'").fetchone())
             s.close()
             SqliteStore(path).close()                                       # reopening an already-migrated database is a no-op
+
+    def test_reopening_leaves_other_import_sources_alone(self):
+        """Only the old fact-import name is renamed: another importer's rows (here a fragment importer) keep their own source across reopens."""
+        import tempfile
+        from pathlib import Path
+        with tempfile.TemporaryDirectory() as d:
+            path = Path(d, "s.db")
+            s = SqliteStore(path)
+            st = s.add_state("x", "a fact", evidence=[Evidence("message", "m1", "a fact")], writer="w", trust="derived", learned_how="inferred")
+            s.map_import("some-fragment", 3105, st.id)
+            s.close()
+            s = SqliteStore(path)
+            got = (s.imported("some-fragment"), s.imported("legacy-fact"))
+            s.close()
+            self.assertEqual(({3105: st.id}, {}), got)

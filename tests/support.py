@@ -6,6 +6,11 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
+import os  # noqa: E402
+
+# switches a live install sets in the hook environment; the tests describe the defaults, and subprocess hooks inherit os.environ
+os.environ.pop("STATEKEEPER_SESSION_NOTE", None)
+
 from statekeeper import Evidence, SqliteStore  # noqa: E402
 
 THEMES = [

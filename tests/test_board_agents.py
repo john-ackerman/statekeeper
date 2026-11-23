@@ -9,8 +9,8 @@ from statekeeper.writers.live import observe_everything
 NOW = datetime(2026, 11, 20, 17, 0, tzinfo=timezone.utc)
 
 
-def agent(aid, state, minutes_ago=5, card="PR-3349", role="builder"):
-    t = (NOW - timedelta(minutes=minutes_ago)).isoformat().replace("+00:00", "Z")
+def agent(aid, state, minutes_ago=5, card="PR-3349", role="builder", now=NOW):
+    t = (now - timedelta(minutes=minutes_ago)).isoformat().replace("+00:00", "Z")
     return {"id": aid, "state": state, "role": role, "card": card, "heartbeatAt": t, "updatedAt": t}
 
 
@@ -51,8 +51,9 @@ class BoardAgents(unittest.TestCase):
 class WhatsRunning(unittest.TestCase):
     def test_the_roll_up_lists_running_board_agents_the_last_release_and_recent_pending_notes(self):
         s = fresh_store()
-        observe_board_agents(s, [agent("build-3349", "running"), agent("done-one", "running")], clock=lambda: datetime.now(timezone.utc))
-        observe_board_agents(s, [agent("done-one", "reported")], clock=lambda: datetime.now(timezone.utc))
+        now = datetime.now(timezone.utc)                                 # the roll-up reads the wall clock, so the heartbeats must be recent to it
+        observe_board_agents(s, [agent("build-3349", "running", now=now), agent("done-one", "running", now=now)], clock=lambda: now)
+        observe_board_agents(s, [agent("done-one", "reported", now=now)], clock=lambda: now)
         s.add_state("Build 7.15.95.13801", "Build 7.15.95.13801 has shipped.", evidence=[ev()], writer="w", trust="verified", learned_how="read")
         s.add_state("install-supervisor-task.ps1", "Installing the supervisor task is pending for John.", evidence=[ev()], writer="w", trust="verified",
                     learned_how="read")

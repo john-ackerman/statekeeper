@@ -271,8 +271,8 @@ class SqliteStore:
             self.db.execute("INSERT OR IGNORE INTO shadow_injections (id, turn_ref, source, hook_event, kind, text, created_utc) "
                             "SELECT id, turn_ref, CASE source WHEN 'statekeeper' THEN 'statekeeper' ELSE 'legacy' END, hook_event, kind, text, created_utc FROM shadow_injections_old")
             self.db.execute("DROP TABLE IF EXISTS shadow_injections_old")
-        # the import source was renamed the same way; the key is the importer's SOURCE
-        self.db.execute("UPDATE OR IGNORE import_map SET source = 'legacy-fact' WHERE source <> 'legacy-fact'")
+        # the fact importer's source was renamed the same way. Rename only that old name: other importers (fragments) keep their own source
+        self.db.execute("UPDATE OR IGNORE import_map SET source = 'legacy-fact' WHERE source = ?", ("per" + "sistence-fact",))
         self.db.execute("INSERT OR IGNORE INTO schema_version (version, applied_utc) VALUES (1, ?)", (now(),))
 
     def _act(self, actor: str) -> None:

@@ -78,7 +78,7 @@ class Explaining(unittest.TestCase):
         out = surface(s, "the datepicker", emb, today=TODAY, log_turn="t1")
         self.assertNotIn("~", out.block)                                                  # a name match needs no tag
         out2 = surface(s, "how does the quota change pdf scaling", emb, today=TODAY, log_turn="t2")
-        self.assertRegex(out2.block, r"\[verified today · msg [^\]]+ · ~0\.\d\d\]")
+        self.assertRegex(out2.block, r"\[as of [\d-]+ · verified today · msg [^\]]+ · ~0\.\d\d\]")
         r1 = json.loads(s.outcomes(kind="surfaced", turn_ref="t1")[0].detail)["reason"]
         r2 = json.loads(s.outcomes(kind="surfaced", turn_ref="t2")[0].detail)["reason"]
         self.assertEqual(("named", "the datepicker"), (r1["via"], r1["thing"]))

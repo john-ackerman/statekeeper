@@ -60,7 +60,9 @@ class Importer(unittest.TestCase):
     def test_the_imported_proposal_is_found_by_meaning(self):
         s = fresh_store()
         import_export(s, EXPORT)
-        out = surface(s, "our cores got upped to 300, what does the quota change", ThemeEmbedder())
+        from datetime import datetime, timezone
+        out = surface(s, "our cores got upped to 300, what does the quota change", ThemeEmbedder(),
+                      today=datetime(2026, 11, 12, tzinfo=timezone.utc))   # a dated state: after a week unconfirmed only its name finds it
         self.assertIn("quota of 300 cores", out.block)
 
     def test_best_sentence_picks_the_sentence_sharing_the_most_words(self):

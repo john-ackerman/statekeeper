@@ -33,7 +33,7 @@ class Surfacing(unittest.TestCase):
         out = surface(self.s, "why is the datepicker slow?", None, today=self.today)
         self.assertIn("the datepicker (thing; named)", out.block)
         self.assertLess(out.block.index("flatpickr"), out.block.index("bootstrap"))
-        self.assertIn("[verified today · msg m-is flatp]", out.block)   # one marker, one short pointer
+        self.assertIn("[as of 2026-11-10 · verified today · msg m-is flatp]", out.block)   # the date it was true, one marker, one short pointer
         self.assertNotIn("source for", out.block)                        # no evidence quotes
 
     def test_a_proposal_is_found_by_meaning_and_only_the_state_that_bears_on_the_input_is_shown(self):
@@ -43,7 +43,7 @@ class Surfacing(unittest.TestCase):
         self.assertIn("the hub (thing; meaning", out.block)
         self.assertIn("caps cores", out.block)
         self.assertNotIn("nightly job", out.block)          # same thing, nothing to do with the input
-        self.assertIn("[agent-claimed", out.block)
+        self.assertRegex(out.block, r"\[as of [\d-]+ · agent-claimed")
         self.assertNotIn("proposed", out.block)             # one marker per line, not a pile of tags
 
     def test_nothing_bears_on_an_input_so_nothing_is_surfaced_and_an_embedder_failure_leaves_names_working(self):

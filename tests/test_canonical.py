@@ -103,9 +103,9 @@ class Retrieval(Base):
 
     def pointing(self):
         orig = self.add("John Ackerman", "John set the rule on 2026-11-12: parent tickets point the investigation effort, sub-issues point their own "
-                        "effort, and totals need not match.", "persistence:998", as_of="2026-11-12")
+                        "effort, and totals need not match.", "persistence:998", as_of="2026-11-12", volatility="rule")
         copy = self.add("ticket pointing", "Parent tickets point the investigation effort, sub-issues point their own effort, and totals need not match.",
-                        "persistence:998", Evidence("state", "#1830"), as_of="2026-11-12")
+                        "persistence:998", Evidence("state", "#1830"), as_of="2026-11-12", volatility="rule")
         from statekeeper.embed import ensure_vectors
         ensure_vectors(self.s, self.emb)
         return orig, copy

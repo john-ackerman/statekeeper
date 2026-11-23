@@ -107,8 +107,38 @@ def stale_live(s: State, today: datetime) -> bool:
     return s.volatility == "live" and s.trust != "owner" and live_age_hours(s, today) > LIVE_STALE_HOURS
 
 
+WORK_ROUTE_DAYS = 7        # a point-in-time ('work') state nobody confirmed for this long reaches an input only through its thing's name
+
+
+def as_of(s: State) -> str:
+    """The date a point-in-time state was true: its as-of date, else when it was written."""
+    return (s.as_of_utc or s.recorded_utc or "")[:10]
+
+
+def point_in_time(s: State) -> bool:
+    """A status that was true at a date ('work', unkeyed). Facts imported from the earlier store that it marked as NOT a state (durable facts that
+    only got the default volatility) are not point-in-time."""
+    return s.volatility == "work" and not s.state_key and not (s.writer.startswith("import:") and not s.is_state)
+
+
+def stale_work(s: State, today: datetime) -> bool:
+    """A point-in-time status last confirmed, or else dated, more than WORK_ROUTE_DAYS ago."""
+    if not point_in_time(s):
+        return False
+    when = max(s.confirmed_utc or "", s.as_of_utc or s.recorded_utc or "")[:19].replace("T", " ")
+    try:
+        return (today - datetime.fromisoformat(when).replace(tzinfo=timezone.utc)).days > WORK_ROUTE_DAYS
+    except ValueError:
+        return False
+
+
 def _freshness(s: State, today: datetime) -> str:
-    """ONE short marker for how far to trust a state right now."""
+    """ONE short marker for how far to trust a state right now (a point-in-time state also says the date it was true)."""
+    mark = _trust_mark(s, today)
+    return f"as of {as_of(s)} · {mark}" if point_in_time(s) and as_of(s) else mark
+
+
+def _trust_mark(s: State, today: datetime) -> str:
     def days(ts: Optional[str]) -> Optional[int]:
         if not ts:
             return None
@@ -496,6 +526,8 @@ def select(store: Store, text: str, embedder: Optional[Embedder], *, floor: floa
         hit = own or obj
         if (own is None or own[1] != "named") and stale_live(s, today):
             continue                                                  # a live value nobody re-read lately is not current: only naming its thing shows it (marked STALE)
+        if own is None and stale_work(s, today):
+            continue                                                  # a week-old unconfirmed status: only its thing's name brings it back (dated)
         if s.id in meaning_off:
             c = None                                                  # surfaces only through its own name
         why_named = (lambda h: {"via": h[1].split()[0], "thing": h[0].name})

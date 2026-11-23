@@ -26,7 +26,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 import shadow_hook  # noqa: E402
 
 CAP = 4000
-SESSION_CAP = 16000
+SESSION_CAP = shadow_hook.SESSION_CAP
 REFRESH_TIMEOUT = 20
 
 
@@ -87,7 +87,7 @@ def main() -> int:
             status = refresh()
             from statekeeper.session import session_block
             store = SqliteStore(os.environ.get("STATEKEEPER_DB") or home / "shadow.db")
-            block = session_block(store, budget=SESSION_CAP)
+            block = session_block(store, budget=shadow_hook.SESSION_BLOCK_BUDGET)
             if block:
                 text = shadow_hook.MARK + "Session start: standing state from the statekeeper store.\n\n" + block
                 sys.stdout.write(json.dumps({"hookSpecificOutput": {"hookEventName": "SessionStart", "additionalContext": text[:SESSION_CAP]}}))

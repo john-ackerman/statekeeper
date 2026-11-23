@@ -67,9 +67,45 @@ def whats_running(store: Store, *, now: datetime | None = None) -> list[str]:
     return out
 
 
+SECTION_SHARE = {"tracked": 0.22, "running": 0.14, "note": 0.20, "topics": 0.06}   # of the budget; the core gets what the others leave
+
+
+def _fit(name: str, lines: list[str], cap: int) -> list[str]:
+    """`lines` cut to `cap` characters at a line boundary, saying how much was left out."""
+    out, used = [], 0
+    for i, ln in enumerate(lines):
+        if used + len(ln) + 1 > cap - 60:
+            return out + [f"[{name} truncated: {len(lines) - i} more lines]"]
+        out.append(ln)
+        used += len(ln) + 1
+    return out
+
+
 def session_block(store: Store, *, budget: int = 9000) -> str:
-    lines: list[str] = []
+    """The live sections first (Tracked now, What's running), then the working note, the topic index and the core, each within its own share of
+    `budget`, so a growing core can never push the live sections off the end."""
+    sections = _session_sections(store)
+    order = ["tracked", "running", "note", "topics", "core"]
+    out: list[str] = []
+    spent = 0
+    for name in order:
+        lines = sections.get(name) or []
+        if not lines:
+            continue
+        cap = int(budget * SECTION_SHARE[name]) if name in SECTION_SHARE else budget - spent
+        fitted = _fit(name, lines, max(0, min(cap, budget - spent)))
+        if not fitted or fitted[0].startswith("["):
+            continue
+        piece = "\n".join(([""] if out else []) + fitted)
+        out.append(piece)
+        spent += len(piece) + 1
+    text = "\n".join(out)
+    return text if len(text) <= budget else text[:budget - 20] + "\n[truncated]"
+
+
+def _session_sections(store: Store) -> dict[str, list[str]]:
     core: list[str] = []
+    sec: dict[str, list[str]] = {}
     for t in store.things():
         if t.retired or t.kind not in ("agent", "person"):
             continue
@@ -77,20 +113,20 @@ def session_block(store: Store, *, budget: int = 9000) -> str:
             if s.status == "active" and s.volatility in ("rule", "stable"):
                 core.append(f"- [{t.name}] {s.text}")
     if core:
-        lines += ["Core: what is standing about me and the people I work with.", *core]
+        sec["core"] = ["Core: what is standing about me and the people I work with.", *core]
     if TOPIC_INDEX:
         try:
             from .topics import topic_index
             idx = topic_index(store, top=20, budget=600)
             if idx:
-                lines += ["", idx]
+                sec["topics"] = idx.split("\n")
         except Exception:
             pass                                           # the index is a convenience: never fail the session start for it
     note = store.find(NOTE_THING) if WITH_NOTE else None
     if note:
         cur = [s for s in store.states_of(note.id) if s.state_key == "note" and s.status == "active"]
         if cur:
-            lines += ["", f"Working note (last changed {cur[0].recorded_utc[:16]}, verified {(cur[0].confirmed_utc or '')[:16]}):", cur[0].text]
+            sec["note"] = [f"Working note (last changed {cur[0].recorded_utc[:16]}, verified {(cur[0].confirmed_utc or '')[:16]}):", *cur[0].text.split("\n")]
     tracked: list[str] = []
     now = datetime.now(timezone.utc)
 
@@ -110,13 +146,12 @@ def session_block(store: Store, *, budget: int = 9000) -> str:
         elif "agent.status" in cur and cur["agent.status"].text.startswith("working") and not age(cur["agent.status"]):
             tracked.append(f"- {t.name}: {cur['agent.status'].text}")
     if tracked:
-        lines += ["", "Tracked now (from outside reads; each has a last-verified time in the store):", *tracked[:40]]
+        sec["tracked"] = ["Tracked now (from outside reads; each has a last-verified time in the store):", *tracked[:40]]
     if RUNNING:
         try:
             running = whats_running(store, now=now)
         except Exception:
             running = []                                   # a convenience: never fail the session start for it
         if running:
-            lines += ["", "What's running (derived from the store, not hand-written):", *running]
-    text = "\n".join(lines)
-    return text if len(text) <= budget else text[:budget - 20] + "\n[truncated]"
+            sec["running"] = ["What's running (derived from the store, not hand-written):", *running]
+    return sec

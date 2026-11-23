@@ -132,6 +132,8 @@ def maybe_observe(state_dir: Path, now: float | None = None) -> bool:
 
 
 MARK = "[statekeeper] "
+SESSION_CAP = 16000         # what the live hook may inject at session start, header included
+SESSION_BLOCK_BUDGET = SESSION_CAP - 200   # the block's own budget (room for the header): the live hook injects it and this hook records the same text
 LIVE_BUDGET = 1800
 LIVE_FLOOR = 0.78          # stricter than the 0.72 default: on 27 real prompts 0.72 injected on 25, 0.78 on 18 and halves the size
 LIVE_MAX_THINGS = 3
@@ -279,7 +281,7 @@ def handle(event: dict, store, embedder, state_dir: Path) -> dict:
     if name == "SessionStart":
         from statekeeper.session import session_block
         ref = f"sess:{session}:{int(time.time() * 1000)}"
-        block = session_block(store)
+        block = session_block(store, budget=SESSION_BLOCK_BUDGET)
         store.record_injection(ref, "statekeeper", f"SessionStart:{event.get('source') or 'startup'}", "session_core", block)
         update_state(state_file, lambda st: st.update({f"start:{session}": {"ref": ref, "at": time.time()}}))
         rec = {"event": name, "session": session, "source": event.get("source"), "block_chars": len(block)}

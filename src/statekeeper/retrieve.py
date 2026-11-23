@@ -432,7 +432,7 @@ def select(store: Store, text: str, embedder: Optional[Embedder], *, floor: floa
     ids = None
     if IDENTIFIERS:
         from .identifiers import IdentifierIndex
-        ids = IdentifierIndex(store.labels(), [" ".join(words(f"{s.thing_name} {s.text}")) for s in standing_all],
+        ids = IdentifierIndex(store.labels(), [" ".join(words(f"{s.thing_name} {s.text}")) for s in standing_all if not name_only(s)],
                               live_values=[(s.thing_id, s.text) for s in standing_all if s.state_key and s.volatility == "live" and s.status == "active"])
     named = _named(store, text, exclude_kinds, exclude_names, ids)
     by_number = getattr(ids, "resolved", set()) if ids is not None else set()
@@ -676,21 +676,21 @@ def select(store: Store, text: str, embedder: Optional[Embedder], *, floor: floa
             reasons[s.id] = {**why_named(hit), "generic": True, **base, "words": shared_words}
     rolled: set[int] = set()
     if ROLLUP and not any(t.kind == "thing" and why == "named" and any(c.isdigit() for c in t.name) for t, why, _s in named.values()):
-        for s in pr_rollup(pool, text):
+        for s in pr_rollup(counted, text):
             scored.append((1.9, s))                                   # "which PRs are red": the current value it asks about, for every open PR
             reasons[s.id] = {"via": "rollup", "thing": s.thing_name}
             rolled.add(s.thing_id)
     if INTENTS:
         from .intents import asks_ship, latest_release, open_asks, waiting_on_john
-        for s in open_asks(pool, text):
+        for s in open_asks(counted, text):
             scored.append((1.85, s))                                  # "what is the priority order of asks": the open asks on the board
             reasons[s.id] = {"via": "rollup", "thing": s.thing_name}
             rolled.add(s.thing_id)
         if asks_ship(text):
-            for s in latest_release(pool):
+            for s in latest_release(counted):
                 scored.append((1.6, s))                               # "did X ship": what the newest release says, beside X's own state
                 reasons[s.id] = {"via": "release", "thing": s.thing_name}
-        for s in waiting_on_john(pool, text)[:ROLLUP_MAX]:
+        for s in waiting_on_john(counted, text)[:ROLLUP_MAX]:
             scored.append((1.6, s))                                   # "is anything waiting on me": the recent notes saying so
             reasons[s.id] = {"via": "waiting", "thing": s.thing_name}
             rolled.add(s.thing_id)
@@ -713,7 +713,7 @@ def select(store: Store, text: str, embedder: Optional[Embedder], *, floor: floa
     if ids is not None:
         # the things that carry one PR number are one subject: notes written before it merged/closed are history, and of its work notes only the newest shows
         from .identifiers import entity_replaced
-        replaced |= entity_replaced(store, ids, [s for _, s in scored], pool)
+        replaced |= entity_replaced(store, ids, [s for _, s in scored], counted)
     for sts in by_thing.values():
         if len(sts) > 1:
             replaced |= set(likely_replaces(sts, store.evidence_of([x.id for x in sts])).values())
@@ -730,7 +730,7 @@ def select(store: Store, text: str, embedder: Optional[Embedder], *, floor: floa
     scored = kept
     if _canon.ON and vec:
         # the same fact stored under several ids is one fact: show its canonical once, at the best rank any copy earned (canonical.py)
-        plain_all = [s for s in standing_all if not s.state_key]
+        plain_all = [s for s in standing_all if not s.state_key and not name_only(s)]
         cidx = _canon.Index(plain_all, store.evidence_of([s.id for s in plain_all]), vec, df=df)    # word rarity as select already counted it
         cidx.named = frozenset(tid for tid, (_t, why, _s) in named.items() if why == "named")
 

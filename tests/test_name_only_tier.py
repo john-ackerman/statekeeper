@@ -39,6 +39,17 @@ class Tier(unittest.TestCase):
         self.imported("PR 3340", "PR 3340 is deployed to prod and approved.")
         self.assertIn(own.id, self.shown("is PR 3340 in prod", max_things=3))
 
+    def test_the_newest_release_is_never_an_imported_note(self):
+        rel = self.add("Build 7.15.95.13801", "Build 7.15.95.13801 shipped the datepicker fix.", as_of="2026-11-20")
+        self.imported("Build 7.15.95.13900", "Nothing in build 7.15.95.13900 was tested in QA yet.")
+        self.assertIn(rel.id, self.shown("what went out in the last prod release", max_things=3))
+
+    def test_imported_notes_do_not_make_a_pr_phrase_common(self):
+        pr = self.add("SendGrid webhook #3342", "The SendGrid webhook PR is a draft with CI green.")
+        for i in range(12):
+            self.imported(f"CRM-{4000 + i}", f"The SendGrid webhook came up in conversation {i}.")
+        self.assertIn(pr.id, self.shown("what's the state of the SendGrid webhook PR", max_things=3))
+
     def test_an_imported_state_still_fills_a_free_slot(self):
         imp = self.imported("CRM-3148", "CRM-3148 tracks the Prince security fixes.")
         self.assertIn(imp.id, self.shown("CRM-3148", max_things=3))

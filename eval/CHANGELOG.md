@@ -30,6 +30,12 @@ specific named states (score 1.0+) and displace the keyed and standing states fo
 close: hook hit@all 0.509, recall 0.564 (remaining gap is live drift: two asks closed by the board writer in between, and one how-to swap).
 Next attempt needs the name-only tier to rank below every non-imported state of the same thing and never take a cap slot from one.
 
+Second attempt (667ab45): the unreviewed tier is appended after every other qualifying state and left out of state counts, word rarity,
+replacements, intents (newest release, asks, PR roll-up, waiting on John), PR phrases and canonical picks. Live copies (14:31), closed / 300
+fragments reopened / all reopened: cases.json hook hit@all 0.509 / 0.509 / 0.509, recall 0.564 x3; audit hook 0.385 x3, recall 0.385 x3 (the first
+pass of the fix, without the intents/phrase exclusions, still lost 3 cases on the full set: hook 0.455). All 4656 reopened on live at 14:57
+(backup shadow-20261123-145705.db); live after: hook 0.509, recall 0.564, audit 0.385 / 0.385, the same as before the reopen.
+
 ## 2026-11-20 recall-dev (sk-improve agent)
 
 Branch `recall-dev`, commits 8483041..7db1aed on top of 00cd05c (the baseline as found). Old `main` was 279e0c0.

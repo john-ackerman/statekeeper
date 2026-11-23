@@ -49,6 +49,17 @@ class TopicTree:
             for p in ps:
                 self.children[p].add(c)
 
+    def ancestors(self, tid: int, limit: int = 50) -> set[int]:
+        """Every thing above `tid` (parents, their parents, ...)."""
+        out: set[int] = set()
+        todo = [tid]
+        while todo and len(out) < limit:
+            for p in self.parents.get(todo.pop(), ()):
+                if p not in out and p != tid:
+                    out.add(p)
+                    todo.append(p)
+        return out
+
     def descendants(self, tid: int, limit: int = 2000) -> set[int]:
         out: set[int] = set()
         todo = [tid]

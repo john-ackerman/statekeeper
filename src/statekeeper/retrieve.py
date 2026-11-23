@@ -115,6 +115,8 @@ def as_of(s: State) -> str:
     return (s.as_of_utc or s.recorded_utc or "")[:10]
 
 
+HIERARCHY = __import__("os").environ.get("STATEKEEPER_HIERARCHY", "1").strip().lower() not in ("0", "off", "false", "no")
+ANCESTOR_SLACK = 0.10      # an ancestor with many states contributes only those nearly as close as the floor
 NAME_ONLY_WRITERS = ("import:conversation",)   # bulk-extracted from old conversations: a low-trust tier until reviewed or confirmed
 
 
@@ -431,7 +433,33 @@ def select(store: Store, text: str, embedder: Optional[Embedder], *, floor: floa
         own_count[s.thing_id] = own_count.get(s.thing_id, 0) + 1
         for tid in {s.thing_id, s.object_id} - {None}:
             standing_count[tid] = standing_count.get(tid, 0) + 1
-    parents = {t.parent_id for t in store.things() if t.parent_id is not None}
+    all_things = store.things()
+    parents = {t.parent_id for t in all_things if t.parent_id is not None}
+    # the hierarchy (topics.TopicTree: parent_id plus name containment): the most specific named things are the leaves of what the input names;
+    # their ancestors' states come along, their siblings (and the siblings' sub-things) stay out unless the input names them too
+    ancestor_of: set[int] = set()
+    siblings: set[int] = set()
+    if HIERARCHY:
+        from .topics import TopicTree
+        tt = TopicTree(all_things)
+        named_ids = {tid for tid, (_t, why, _s) in named.items() if why == "named"}
+        leaves = {tid for tid in named_ids if not (tt.descendants(tid, limit=400) & named_ids)}
+        filed_under: dict[int, set[int]] = {}                         # explicit filing only (parent_id): name containment is too loose to exclude by
+        for t in all_things:
+            if t.parent_id is not None and not t.retired:
+                filed_under.setdefault(t.parent_id, set()).add(t.id)
+        by_id = {t.id: t for t in all_things}
+        for leaf in leaves:
+            ups = tt.ancestors(leaf)
+            ancestor_of |= ups
+            p = by_id[leaf].parent_id if leaf in by_id else None
+            while p is not None and p in by_id:
+                for c in filed_under.get(p, ()):
+                    if c != leaf and c not in ups and c not in named_ids:
+                        siblings |= {c} | tt.descendants(c, limit=400)
+                p = by_id[p].parent_id
+        ancestor_of -= named_ids
+        siblings -= named_ids | ancestor_of
     # a name that many states mention in passing ("board", a tool, a repo) is a common word here, not a pointer to one subject
     texts = None
     mentioned_widely: set[int] = set()
@@ -541,6 +569,8 @@ def select(store: Store, text: str, embedder: Optional[Embedder], *, floor: floa
         hit = own or obj
         if (own is None or own[1] != "named") and stale_live(s, today):
             continue                                                  # a live value nobody re-read lately is not current: only naming its thing shows it (marked STALE)
+        if s.thing_id in siblings and own is None:
+            continue                                                  # a sibling of the thing the input names: not about this input
         if name_only(s) and not (own is not None and (s.thing_id in by_number or numbered(t.name))):
             continue                                                  # bulk-imported, unreviewed: only an identifier the input says brings it up
         if own is None and stale_work(s, today):
@@ -574,6 +604,9 @@ def select(store: Store, text: str, embedder: Optional[Embedder], *, floor: floa
         elif specific:
             scored.append((1.0 + (c or 0.0) / 10, s))
             reasons[s.id] = {**why_named(own), "specific": True, **base}
+        elif s.thing_id in ancestor_of and own is None and (own_count.get(s.thing_id, 0) <= SPECIFIC_MAX or (c is not None and c >= floor - ANCESTOR_SLACK)):
+            scored.append((0.95 + (c or 0.0) / 20, s))                # what holds for everything above the named thing (LaunchDarkly, for a flag)
+            reasons[s.id] = {"via": "ancestor", "thing": t.name, **base}
         elif c is not None and c >= floor:
             scored.append((c, s))
             reasons[s.id] = {"via": "meaning", **base, **({"words": shared_words} if shared_words else {})}

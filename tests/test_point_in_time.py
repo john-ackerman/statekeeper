@@ -59,9 +59,15 @@ class ImportedConversation(unittest.TestCase):
         st = self.add("import:conversation:run1")
         self.assertNotIn(f"#{st.id}", surface(self.s, "is the slack board watch working", ThemeEmbedder(), floor=0.5, today=TODAY).block)
 
-    def test_naming_its_thing_shows_it(self):
+    def test_naming_a_plain_thing_does_not_show_it(self):
         st = self.add("import:conversation:run1")
-        self.assertIn(f"#{st.id}", surface(self.s, "the slack relay", ThemeEmbedder(), floor=0.5, today=TODAY).block)
+        self.assertNotIn(f"#{st.id}", surface(self.s, "the slack relay", ThemeEmbedder(), floor=0.5, today=TODAY).block)
+
+    def test_an_identifier_in_the_input_shows_it(self):
+        st = self.add("import:conversation:run1", thing="PR #3376")
+        self.assertIn(f"#{st.id}", surface(self.s, "where is 3376", ThemeEmbedder(), floor=0.5, today=TODAY).block)
+        st2 = self.add("import:conversation:run1", thing="CRM-3148")
+        self.assertIn(f"#{st2.id}", surface(self.s, "CRM-3148", ThemeEmbedder(), floor=0.5, today=TODAY).block)
 
     def test_once_confirmed_it_routes_like_any_state(self):
         st = self.add("import:conversation:run1")

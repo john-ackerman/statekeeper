@@ -124,6 +124,12 @@ def name_only(s: State) -> bool:
     return s.writer.startswith(NAME_ONLY_WRITERS) and s.trust == "extracted" and not s.confirmed_utc
 
 
+def numbered(name: str) -> bool:
+    """A thing whose name carries a ticket, PR or build number ("CRM-3148", "PR #3376")."""
+    from .identifiers import numbers_in_text
+    return bool(numbers_in_text(name))
+
+
 def point_in_time(s: State) -> bool:
     """A status that was true at a date ('work', unkeyed). Facts imported from the earlier store that it marked as NOT a state (durable facts that
     only got the default volatility) are not point-in-time."""
@@ -535,8 +541,8 @@ def select(store: Store, text: str, embedder: Optional[Embedder], *, floor: floa
         hit = own or obj
         if (own is None or own[1] != "named") and stale_live(s, today):
             continue                                                  # a live value nobody re-read lately is not current: only naming its thing shows it (marked STALE)
-        if own is None and name_only(s):
-            continue                                                  # bulk-imported, unreviewed: only its thing's name brings it up
+        if name_only(s) and not (own is not None and (s.thing_id in by_number or numbered(t.name))):
+            continue                                                  # bulk-imported, unreviewed: only an identifier the input says brings it up
         if own is None and stale_work(s, today):
             continue                                                  # a week-old unconfirmed status: only its thing's name brings it back (dated)
         if s.id in meaning_off:

@@ -6,7 +6,6 @@ from __future__ import annotations
 
 import json
 import os
-import subprocess
 import sys
 import tempfile
 from pathlib import Path
@@ -15,6 +14,7 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "src"))
 
 from statekeeper import Evidence, SqliteStore, surface  # noqa: E402
+from statekeeper.proc import run  # noqa: E402
 
 
 def check(ok: bool, what: str) -> None:
@@ -39,7 +39,7 @@ def main() -> int:
         env = dict(os.environ, STATEKEEPER_DB=db, PYTHONUTF8="1")
         env.pop("STATEKEEPER_EMBED_URL", None)
         hook = str(ROOT / "adapters" / "claude_code" / "recall_hook.py")
-        r = subprocess.run([sys.executable, hook], input=json.dumps({"prompt": "the converter?"}), capture_output=True, text=True, env=env)
+        r = run([sys.executable, hook], input=json.dumps({"prompt": "the converter?"}), capture_output=True, text=True, env=env)
         check("caps replicas at 75" in r.stdout, "the adapter prints the state as additional context")
     print("smoke passed")
     return 0

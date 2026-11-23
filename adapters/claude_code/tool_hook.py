@@ -81,8 +81,9 @@ def existing(path: str, names: list[str], timeout: float = 3.0) -> list[str]:
     folder = Path(path).parent
     while not folder.exists() and folder != folder.parent:
         folder = folder.parent
+    from statekeeper.proc import run      # no console window per git call (the hook has none: each call would flash one)
     try:
-        root = subprocess.run(["git", "rev-parse", "--show-toplevel"], cwd=folder, capture_output=True, text=True, timeout=timeout).stdout.strip()
+        root = run(["git", "rev-parse", "--show-toplevel"], cwd=folder, capture_output=True, text=True, timeout=timeout).stdout.strip()
     except (OSError, subprocess.SubprocessError):
         return []
     if not root:
@@ -93,7 +94,7 @@ def existing(path: str, names: list[str], timeout: float = 3.0) -> list[str]:
         words = name_words(name)
         probe = max(words, key=len) if words else name
         try:
-            r = subprocess.run(["git", "grep", "-n", "-I", "-i", "-E", rf"(def|class|function|interface|struct|enum|record|type|const|let|\)|>|[a-z])[ \t]+\w*{re.escape(probe)}\w*"],
+            r = run(["git", "grep", "-n", "-I", "-i", "-E", rf"(def|class|function|interface|struct|enum|record|type|const|let|\)|>|[a-z])[ \t]+\w*{re.escape(probe)}\w*"],
                                cwd=root, capture_output=True, text=True, encoding="utf-8", errors="ignore", timeout=timeout)
         except (OSError, subprocess.SubprocessError):
             continue

@@ -8,13 +8,13 @@ from __future__ import annotations
 
 import json
 import re
-import subprocess
 import tempfile
 import time
 import uuid
 from typing import Callable
 
 from .claims import ClaimError, submit_claim
+from .proc import run
 from .store import Store
 
 MODEL = "claude-haiku-5-5"
@@ -66,7 +66,7 @@ def parse(text: str) -> dict:
 def call_haiku(prompt: str) -> str:
     """No user settings, so none of the user's hooks run; an empty working directory, so no project settings either."""
     with tempfile.TemporaryDirectory() as cwd:
-        r = subprocess.run(["claude", "-p", "--setting-sources", "project", "--model", MODEL, "--tools", "", "--no-session-persistence", "--output-format", "json"],
+        r = run(["claude", "-p", "--setting-sources", "project", "--model", MODEL, "--tools", "", "--no-session-persistence", "--output-format", "json"],
                            input=prompt, capture_output=True, text=True, timeout=300, cwd=cwd, encoding="utf-8")
     if r.returncode != 0:
         said = r.stderr.strip()

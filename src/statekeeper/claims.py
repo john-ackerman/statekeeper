@@ -84,7 +84,13 @@ def submit_claim(store: Store, claim: dict | str) -> ClaimResult:
     trust = requested if TRUST_ORDER[requested] <= TRUST_ORDER[limit] else limit
     clamped = requested if trust != requested else None
     from .rehome import home_of
-    thing, obj = home_of(store, claim["thing"].strip(), claim.get("object"), claim.get("state_key"))   # under the tool/topic, not the speaker
+    from .reparent import place
+    try:                                                              # "Parent > child", new things filed under the hierarchy, generic words refused
+        subject = place(store, claim["thing"], text=claim["text"], actor=writer, refuse_generic=trust == "extracted")
+        obj = place(store, claim["object"], text=claim["text"], actor=writer, refuse_generic=trust == "extracted") if claim.get("object") else None
+    except StoreError as e:
+        raise ClaimError(str(e)) from None
+    thing, obj = home_of(store, subject, obj, claim.get("state_key"))   # under the tool/topic, not the speaker
     state = store.add_state(thing, claim["text"], evidence=evidence, writer=writer, trust=trust, learned_how=learned, session_id=session,
                             object=obj, kind=claim.get("kind", "belief"), state_key=claim.get("state_key"), as_of=claim.get("as_of"),
                             volatility=claim.get("volatility", "work"), verify_handle=claim.get("verify_handle"), supersedes=claim.get("supersedes"))

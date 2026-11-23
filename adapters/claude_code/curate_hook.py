@@ -60,7 +60,8 @@ def decide(event: dict, home: Path, threshold: int) -> str:
     return (f"Your context is at {tokens:,} tokens. Before long it is reset, and what you know then is Statekeeper: the core, the working note "
             f"and what is tracked. This is your curation pass, once per stretch. Save what this stretch earned and is not stored yet: decisions in the "
             f"person's own words, tools and how to use them, what is running and how to pick it up, what you learned about the work, the person and "
-            f"yourself (`{SK} add <thing> \"<sentence>\" [--stable|--rule] [--evidence <ref>]`; `{SK} search <words>` first, and `{SK} supersede "
+            f"yourself (`{SK} add <thing> \"<sentence>\" [--stable|--rule] [--evidence <ref>]`, under the most specific thing, `\"Parent > new thing\"` "
+            f"for a new one under a known parent; `{SK} search <words>` first, and `{SK} supersede "
             f"<id> \"<new text>\"` rather than adding beside a stale state). Bring the working note up to date (`{SK} note --content -`). Leave out "
             "the transcript itself (the conversation is recorded), what the core already says, and narration: keep conclusions, decisions and how to "
             "resume. Then carry on with what you were doing.")

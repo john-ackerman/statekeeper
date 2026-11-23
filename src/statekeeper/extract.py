@@ -24,6 +24,7 @@ PROMPT = """You read one message from an agent's working history and write down 
 
 Rules:
 - A thing is a named person, agent, project, piece of code, ticket, machine or concept that someone would name again. Reuse a name from KNOWN THINGS exactly when the message means the same one.
+- Use the MOST SPECIFIC thing: a flag, PR, ticket or component rather than the tool, repo or area it belongs to. A new thing that is part of a known one is written "Known > new name" (for example "LaunchDarkly flag > receipting-repair-requires-rendered"). Never make a new one-word thing ("watcher", "rollout", "recall"): use a known thing or a specific name.
 - A fact is ONE plain sentence the message states about a subject thing, optionally naming an object thing. Only what the message says, never an inference, no stronger than it says it: keep "may", "planned", "proposed".
 - File a fact under the tool, project, ticket or topic it is about, not under the person or agent who said or did it; name that person or agent as the object. "Jane fills .env.local for login-tool" has thing "login-tool" and object "Jane".
 - claim: "fact" (something said to be so or to have happened), "proposal" (a suggestion, offer, request or plan not said to be carried out; the text must say so), or "instruction" (a one-off order for one session or run; instructions are dropped).
@@ -32,7 +33,7 @@ Rules:
 - as_of: the date it became true (YYYY-MM-DD) when the message gives it, else null. Never today's date.
 - Leave out the agent's own progress and status lines (running, waiting, queued, re-armed, nothing new), passing detail, one-off steps and facts about the message itself. Fewer facts for a short message; none if it states nothing lasting. At most {max_facts}, the most useful first: decisions and why, what depends on what, what state something is in.
 
-KNOWN THINGS (name | kind):
+KNOWN THINGS (name | kind | under its parent):
 {known}
 
 CURRENT STATES of things this message names:
@@ -80,9 +81,12 @@ def call_haiku(prompt: str) -> str:
 
 
 class Extractor:
-    def __init__(self, store: Store, call: Callable[[str], str] = call_haiku, session: str | None = None, user_source: str = "user"):
-        """`user_source` is the `source` value that marks a message as written by the person (anything else is treated as agent output)."""
+    def __init__(self, store: Store, call: Callable[[str], str] = call_haiku, session: str | None = None, user_source: str = "user",
+                 writer_prefix: str = "extractor"):
+        """`user_source` is the `source` value that marks a message as written by the person (anything else is treated as agent output).
+        `writer_prefix` names the writer ("import:conversation" for the bulk import: its states reach an input only by an identifier until reviewed)."""
         self.store, self.call, self.session, self.user_source = store, call, session or f"extract-{uuid.uuid4().hex[:8]}", user_source
+        self.writer_prefix = writer_prefix
 
     def prompt(self, m: dict) -> str:
         things = self.store.things()
@@ -90,7 +94,14 @@ class Extractor:
         low = content.lower()
         touched = [t for t in things if not t.retired and len(t.name) > 3 and t.name.lower() in low]
         current = [f"{t.name}: {s.text}" for t in touched[:8] for s in self.store.states_of(t.id)[:4]]
-        return PROMPT.format(max_facts=MAX_FACTS, known="\n".join(f"{t.name} | {t.kind}" for t in touched[:60]) or "(none yet)",
+        by_id = {t.id: t for t in things}
+        shown = touched[:60]
+        shown += [by_id[p] for p in dict.fromkeys(t.parent_id for t in shown) if p in by_id and by_id[p] not in shown]   # where they sit, too
+
+        def row(t) -> str:
+            p = by_id.get(t.parent_id) if t.parent_id is not None else None
+            return f"{t.name} | {t.kind}" + (f" | under {p.name}" if p else "")
+        return PROMPT.format(max_facts=MAX_FACTS, known="\n".join(row(t) for t in shown) or "(none yet)",
                              current="\n".join(current) or "(none)", id=m["id"], source=m.get("source"), date=(m.get("created") or "")[:10], content=content[:6000])
 
     def _owned_by_writer(self, name: str) -> bool:
@@ -100,7 +111,7 @@ class Extractor:
         return bool(t) and any(s.state_key and s.status == "active" and s.writer.startswith("rule:") for s in self.store.states_of(t.id))
 
     def extract(self, m: dict) -> dict:
-        run = f"extractor:{uuid.uuid4().hex[:8]}"
+        run = f"{self.writer_prefix}:{uuid.uuid4().hex[:8]}"
         rec = {"message": m["id"], "source": m.get("source"), "run": run, "retries": 0, "written": [], "rejected": {}, "facts_seen": 0}
         prompt = self.prompt(m)
         t0 = time.time()

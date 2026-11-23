@@ -33,9 +33,69 @@ class Hierarchy(unittest.TestCase):
         self.assertIn(self.root.id, got)
         self.assertNotIn(self.sib.id, got)
 
+    def test_an_explicit_parent_overrides_name_containment(self):
+        s = self.s
+        s.add_thing("pdf-converter")
+        s.add_thing("pdf-converter-service-enabled", parent="LaunchDarkly")
+        tt = tree(s)
+        self.assertEqual({s.find("LaunchDarkly").id}, tt.ancestors(s.find("pdf-converter-service-enabled").id))
+
+    def test_a_name_inside_a_longer_named_name_is_not_named_on_its_own(self):
+        s = self.s
+        s.add_thing("pdf-converter")
+        inner = s.add_state("pdf-converter", "Prince renders procfs files as empty.", evidence=[ev("p", "x")], writer="w", trust="derived",
+                            learned_how="inferred", volatility="stable")
+        out = surface(s, "is receipting-repair-requires-rendered on", None, floor=0.5, max_things=4)
+        self.assertIn(self.leaf.id, {x.id for it in out.items for x in it.states})
+        s.add_thing("pdf-converter-service-enabled", parent="LaunchDarkly")
+        s.add_state("pdf-converter-service-enabled", "On with fallthrough false.", evidence=[ev("q", "y")], writer="w", trust="derived",
+                    learned_how="inferred", volatility="stable")
+        out = surface(s, "is pdf-converter-service-enabled on", None, floor=0.5, max_things=4)
+        self.assertNotIn(inner.id, {x.id for it in out.items for x in it.states})
+        out = surface(s, "pdf-converter and pdf-converter-service-enabled", None, floor=0.5, max_things=4)
+        self.assertIn(inner.id, {x.id for it in out.items for x in it.states})      # said on its own as well: named
+
+    def test_a_name_resolved_from_a_number_does_not_hide_a_shorter_name(self):
+        from statekeeper.retrieve import _subsumed
+        self.assertFalse(_subsumed("PR 3266", ["VirtuousV2 PR 3266"], "where are we on CI for 3266"))
+        self.assertTrue(_subsumed("PR 3266", ["VirtuousV2 PR 3266"], "where are we on CI for VirtuousV2 PR 3266"))
+
+    def test_a_filed_leaf_with_a_few_more_states_is_still_specific(self):
+        s = self.s
+        for i in range(7):
+            s.add_state("receipting-repair-requires-rendered", f"Fact {i} about the guard.", evidence=[ev(f"g{i}", "z")], writer="w",
+                        trust="derived", learned_how="inferred", volatility="stable")
+        out = surface(s, "receipting-repair-requires-rendered", None, floor=0.5, max_things=4)
+        self.assertTrue({x.thing_id for it in out.items for x in it.states} & {s.find("receipting-repair-requires-rendered").id})
+
     def test_two_named_leaves_both_surface(self):
         got = self.ids("receipting-repair-requires-rendered and sendgrid-webhook-require-signature in production")
         self.assertTrue({self.leaf.id, self.sib.id} <= got)
+
+    def test_a_named_leaf_with_a_few_children_still_shows_its_own_states(self):
+        s = self.s
+        s.add_thing("board")
+        s.add_thing("board watcher", parent="board")
+        s.add_thing("board watcher Monitor", parent="board watcher")
+        st = s.add_state("board watcher", "It failed silently when it expired and nobody re-armed it.", evidence=[ev("w", "x")], writer="w",
+                         trust="derived", learned_how="inferred", volatility="stable")
+        out = surface(self.s, "how does the board watcher work", None, floor=0.5, max_things=4)    # meaning down: only its name can bring it
+        self.assertIn(st.id, {x.id for it in out.items for x in it.states})
+
+    def test_a_sibling_spelled_almost_the_same_is_not_a_sibling(self):
+        s = self.s
+        s.add_thing("board")
+        s.add_thing("board watcher", parent="board")
+        s.add_thing("board-watch", parent="board")
+        s.add_thing("board asks", parent="board")
+        add = lambda thing, text, ref: s.add_state(thing, text, evidence=[ev(ref, text)], writer="w", trust="derived", learned_how="inferred",
+                                                   volatility="stable")
+        add("board watcher", "The slack board watch loop re-arms every half hour.", "w1")
+        same = add("board-watch", "The slack board watch loop is a Monitor over the board events.", "w2")
+        other = add("board asks", "The slack board asks list holds questions for John.", "w3")
+        got = self.ids("the slack board watcher loop")
+        self.assertIn(same.id, got)
+        self.assertNotIn(other.id, got)
 
     def test_naming_only_the_parent_gives_the_parent_not_every_child(self):
         got = self.ids("what is the state of the LaunchDarkly flag new-thing-xyz in production")

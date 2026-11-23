@@ -70,8 +70,8 @@ class Filtering(unittest.TestCase):
 
     def test_facts_are_written_as_extracted_proposals_citing_the_message(self):
         s = fresh_store()
-        Extractor(s, call=lambda p: answer({"thing": "quota", "text": "is 300 cores"}), session="run-1").extract(msg("the quota is 300 cores", id=42))
-        st = s.states_of(s.find("quota").id)[0]
+        Extractor(s, call=lambda p: answer({"thing": "PDF converter quota", "text": "is 300 cores"}), session="run-1").extract(msg("the quota is 300 cores", id=42))
+        st = s.states_of(s.find("PDF converter quota").id)[0]
         self.assertEqual(("proposed", "extracted", "run-1"), (st.status, st.trust, st.session_id))
         self.assertTrue(st.writer.startswith("extractor:"))
         e = s.evidence_of([st.id])[st.id][0]

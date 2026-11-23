@@ -22,7 +22,8 @@ SK = f'python "{Path(__file__).resolve().parents[2] / "tools" / "sk.py"}"'
 LEAD = ("# Who you are\n\nYou are a subagent of a Claude whose standing state lives in Statekeeper; this is that core, and so yours: the same self, "
         "with a task. Before re-deriving something from the code, look: `{sk} recall <words>` or `{sk} search <words>` (`show <id>` for the full "
         "text). When you learn something the main session cannot see from your report (a gotcha, a tool and how to use it, a fact about the code), "
-        "write it: `{sk} add <thing> \"<one sentence>\" [--stable] [--evidence <file or URL>]` (it names near-duplicates; `supersede <id>` "
+        "write it: `{sk} add <thing> \"<one sentence>\" [--stable] [--evidence <file or URL>]` (the most specific thing: a flag, PR or ticket "
+        "over its tool or repo; `\"Parent > new thing\"` files a new one under a known parent; it names near-duplicates; `supersede <id>` "
         "instead of adding beside one). Leave the working note to the main session.")
 
 

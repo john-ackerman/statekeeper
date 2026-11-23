@@ -1,5 +1,5 @@
-"""The topic tree over the existing 'thing' layer: a thing sits under another when the store says so (parent_id) or when its name contains the other's
-whole name ("receipting security review" under "receipting", "Receipt Date backfill" under "Receipt Date" under "Receipt"). Nothing is written: the
+"""The topic tree over the existing 'thing' layer: a thing sits under another when the store says so (parent_id), else when its name contains the
+other's whole name ("receipting security review" under "receipting", "Receipt Date backfill" under "Receipt Date" under "Receipt"). Nothing is written: the
 tree is derived on read, so a renamed or merged thing moves with its name.
 
 Used three ways: naming a topic lets its sub-areas' states qualify the way a named generic thing's own states do (retrieve.select); `sk topic <name>`
@@ -33,6 +33,7 @@ class TopicTree:
         for t in self.things.values():
             if t.parent_id is not None and t.parent_id in self.things:
                 self.parents[t.id].add(t.parent_id)
+                continue                                       # filed on purpose: its name's words are not also its ancestors ("pdf-converter-x" flag)
             k = _key(t.name)
             if any(ch in t.name for ch in "/\\") or len(k) < 2:
                 continue                                       # a file path or a one-word name has no name-derived parent

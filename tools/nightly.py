@@ -96,6 +96,16 @@ def main() -> int:
                 and not (x.volatility == "rule" and x.state_key)][:60]
         return apply(st, plan(st, todo))
 
+    def reparent():
+        """Things made since last night filed under their parents (statekeeper.reparent: identifier, a PR's ticket, flag keys, leading name);
+        a flag said two ways merged. Idempotent; each move is one event."""
+        from statekeeper.reparent import apply, merge_plan, plan
+        st = SqliteStore(db)
+        merges = merge_plan(st)
+        apply(st, [], actor="rule:reparent", merges=merges)
+        done = apply(st, plan(st), actor="rule:reparent")
+        return {"merged": len(merges), "moved": len(done), "sample": [f"{m['child']} < {m['parent']}" for m in done[:5]]}
+
     def questions():
         """Requests each new durable/how-to state answers (statekeeper.questions; one model call per 15 states), then their vectors."""
         from statekeeper.questions import ensure_question_vectors, generate
@@ -149,6 +159,7 @@ def main() -> int:
     step(log, "backup", backup)
     step(log, "observe-writers", observe)
     step(log, "skills", skills)
+    step(log, "reparent", reparent)
     if not args.skip_import:
         step(log, "reimport-legacy", reimport)
     if not args.skip_embed:

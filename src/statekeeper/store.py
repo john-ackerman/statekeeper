@@ -138,6 +138,7 @@ class Store(Protocol):
     def add_alias(self, name: str, alias: str, note: str | None = None, *, actor: str = "owner") -> None: ...
     def rename(self, name: str, new_name: str, *, actor: str = "owner") -> Thing: ...
     def merge(self, from_name: str, into_name: str, reason: str = "", *, actor: str = "owner") -> tuple[Thing, int]: ...
+    def set_parent(self, thing_id: int, parent_id: int | None, reason: str, *, actor: str = "owner") -> Thing: ...
     # states
     def add_state(self, thing: str, text: str, *, evidence: Sequence[Evidence], writer: str, trust: str, learned_how: str,
                   session_id: str | None = None, object: str | None = None, kind: str = "belief", state_key: str | None = None,
@@ -367,6 +368,26 @@ class SqliteStore:
             db.execute("UPDATE things SET name = ? WHERE id = ?", (new_name.strip(), t.id))
             db.execute("INSERT INTO events (event_type, thing_id, actor, payload, recorded_utc) VALUES ('thing-renamed', ?, ?, json_object('from', ?, 'to', ?), ?)",
                        (t.id, actor, t.name, new_name.strip(), now()))
+        return self.get(t.id)  # type: ignore[return-value]
+
+    def set_parent(self, thing_id, parent_id, reason, *, actor="owner") -> Thing:
+        """Files a thing under another (or under nothing, parent_id None). Refuses a parent that sits under the thing already (a loop)."""
+        t = self.get(thing_id)
+        if t is None or t.retired:
+            raise StoreError(f"there is no thing #{thing_id}")
+        if parent_id is not None:
+            p, seen = self.get(parent_id), set()
+            if p is None or p.retired:
+                raise StoreError(f"there is no thing #{parent_id} to be the parent")
+            while p is not None and p.id not in seen:
+                if p.id == t.id:
+                    raise StoreError(f"{t.name} cannot go under something filed under it")
+                seen.add(p.id)
+                p = self.get(p.parent_id) if p.parent_id is not None else None
+        with self._tx(actor) as db:
+            db.execute("UPDATE things SET parent_id = ? WHERE id = ?", (parent_id, t.id))
+            db.execute("INSERT INTO events (event_type, thing_id, actor, payload, recorded_utc) VALUES ('thing-reparented', ?, ?, json_object('from', ?, 'to', ?, 'reason', ?), ?)",
+                       (t.id, actor, t.parent_id, parent_id, reason, now()))
         return self.get(t.id)  # type: ignore[return-value]
 
     def merge(self, from_name, into_name, reason="", *, actor="owner") -> tuple[Thing, int]:

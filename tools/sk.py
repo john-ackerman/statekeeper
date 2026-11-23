@@ -8,7 +8,8 @@
     python tools/sk.py [--db PATH] show <id>                    one state with its full evidence (e.g. a long imported note), links and history
     python tools/sk.py [--db PATH] add <thing> <text|-> [--object THING] [--rule] [--stable] [--evidence REF] [--owner]
                                                                 write a state (an agent's claim unless --owner); prints the nearest existing states,
-                                                                so a near-duplicate becomes a `supersede` instead
+                                                                so a near-duplicate becomes a `supersede` instead. <thing> "Parent > child" files a
+                                                                new child under a known parent; a new thing is filed by the re-parent rules
     python tools/sk.py [--db PATH] supersede <id> <text|-> [--reason R]   a change of mind: the new state replaces #id (kept as history)
     python tools/sk.py [--db PATH] alias <thing> <alias>        another name people use for a thing ("sign in to QA" for a login tool)
     python tools/sk.py [--db PATH] core                         the session-start block (core, working note, tracked now)
@@ -163,7 +164,7 @@ def main(argv: list[str] | None = None) -> int:
     p = sub.add_parser("show")
     p.add_argument("id", type=lambda v: int(v.lstrip("#")))
     p = sub.add_parser("add")
-    p.add_argument("thing")
+    p.add_argument("thing", help="the most specific thing it is about; 'Parent > child' files a new child under a known parent")
     p.add_argument("text")
     p.add_argument("--object", default=None)
     p.add_argument("--rule", action="store_true", help="a standing way of working (kind rule)")
@@ -221,6 +222,10 @@ def main(argv: list[str] | None = None) -> int:
                 print(f"  {rel} #{b if a == s.id else a} ({score:.2f})")
         elif args.cmd == "add":
             text = _text(args.text)
+            from statekeeper.reparent import place
+            args.thing = place(store, args.thing, text=text, actor=f"{'owner' if args.owner else args.actor}:sk", refuse_generic=False)   # "Parent > child" files it
+            if args.object:
+                args.object = place(store, args.object, text=text, actor=f"{'owner' if args.owner else args.actor}:sk", refuse_generic=False)
             emb = _embedder()
             near = nearest(store, f"{args.thing}: {text}", emb)
             ref = args.evidence or (f"session {_session()}" if _session() else "sk add")

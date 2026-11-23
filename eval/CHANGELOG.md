@@ -4,6 +4,23 @@ Every change here was measured with `python eval/run_eval.py` on the frozen snap
 path unless noted. Numbers are for the ORIGINAL 55 cases; the cases added later are reported separately so the baseline stays comparable.
 "strict" and "lenient" are hit-any. Stale = cases (of 15 with a check) that injected a must-not state.
 
+## 2026-11-23 hierarchy filing, re-parent, conversation import gate (sk-improve2)
+
+Measured on a verified copy of the live store taken 2026-11-23 11:42 (not the frozen snapshot: the hierarchy needs today's things), all three
+columns with the same final code. Audit set = `cases-audit-20261123.json`, now 13 cases (3 new `hier-*` cases: one flag, two flags, parent only).
+
+| Store | cases.json hook hit@all / hit@1 / lenient | recall hit@all / hit@1 | audit hook hit@all / hit@1 | audit recall hit@all / hit@1 | audit stale cases |
+|---|---|---|---|---|---|
+| copy as found | 0.509 / 0.400 / 0.745 | 0.582 / 0.418 | 0.462 / 0.231 | 0.462 / 0.154 | 2 |
+| + `tools/reparent.py --apply` (562 moves, 3 flag merges) | 0.509 / 0.400 / 0.745 | 0.582 / 0.418 | 0.462 / 0.385 | 0.538 / 0.308 | 1 |
+| + 60-fragment conversation import sample (89 written, 43 corroborated, $0.17) | 0.509 / 0.400 / 0.745 | 0.582 / 0.418 | 0.462 / 0.385 | 0.538 / 0.308 | 1 |
+
+Rejected on the way (each cost cases): treating any thing with a child as generic (the board watcher lost its own states once "board watcher
+Monitor" was filed under it: only a container with more than 6 children is generic now); excluding a sibling spelled almost the same ("board-watch"
+beside "board watcher"); un-naming a name said inside a longer name even when it is above that thing ("DocRaptor" in "DocRaptor fallback" lost
+dec-docraptor-removal and dec-receipt-model lenient hits) or when the longer name was only resolved from a number ("PR 3266" vs "VirtuousV2 PR
+3266" from "CI for 3266" lost pr-3266-ci and pr-3313-copilot).
+
 ## 2026-11-20 recall-dev (sk-improve agent)
 
 Branch `recall-dev`, commits 8483041..7db1aed on top of 00cd05c (the baseline as found). Old `main` was 279e0c0.

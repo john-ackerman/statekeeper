@@ -7,15 +7,17 @@ supersedes the old one by key and leaves it as history. The verify handle is the
 from __future__ import annotations
 
 import json
+import re
 from typing import Callable
 
 from ..proc import run
-from ..store import Evidence, Store, now
+from ..store import Evidence, Store, StoreError, now
 from .common import observe_keyed
 
 WRITER = "rule:github-pr"
 WIP_CHECKS = frozenset({"WIP"})
-FIELDS = "state,isDraft,reviewDecision,statusCheckRollup,headRefOid,updatedAt"
+FIELDS = "state,isDraft,reviewDecision,statusCheckRollup,headRefOid,updatedAt,title"
+_TICKET = re.compile(r"\b(?:CRM|VP|VS)-\d+\b", re.I)
 
 
 def normalize(p: dict) -> dict[str, str]:
@@ -50,7 +52,17 @@ def fetch(repo_slug: str, number: int) -> dict:
 def observe_pr(store: Store, repo: str, number: int, payload: dict, clock: Callable[[], str] = now) -> dict:
     """Writes one observation of PR `repo`#`number`. Returns the state per key, plus "changed": the keys whose value differs from the previous one."""
     ev = Evidence("tool", f"gh pr view {repo}#{number}", json.dumps({k: payload.get(k) for k in ("state", "isDraft", "reviewDecision", "headRefOid", "updatedAt")})[:300])
-    return observe_keyed(store, writer=WRITER, thing=f"{repo} PR {number}", parent=repo, observations=normalize(payload), evidence=ev,
-                         handle=f"gh pr view {number} --repo {repo} --json {FIELDS}", as_of=payload.get("updatedAt"), clock=clock)
+    thing = f"{repo} PR {number}"
+    keys = {k.upper() for k in _TICKET.findall(str(payload.get("title") or ""))}
+    ticket = store.find(next(iter(keys))) if len(keys) == 1 else None      # a PR is filed under the one known ticket its title names, else its repo
+    out = observe_keyed(store, writer=WRITER, thing=thing, parent=ticket.name if ticket else repo, observations=normalize(payload), evidence=ev,
+                        handle=f"gh pr view {number} --repo {repo} --json {FIELDS}", as_of=payload.get("updatedAt"), clock=clock)
+    t, r = store.find(thing), store.find(repo)
+    if ticket and t and t.parent_id != ticket.id and (t.parent_id is None or (r and t.parent_id == r.id)):
+        try:
+            store.set_parent(t.id, ticket.id, "the PR's title names its ticket", actor=WRITER)
+        except StoreError:
+            pass
+    return out
 
 

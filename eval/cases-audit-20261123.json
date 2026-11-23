@@ -25,6 +25,18 @@
     {"id": "audit-watcher", "category": "live-ask", "prompt": "is the watcher running", "expect": [[4422]], "stale": [],
      "verified": "#4422 work-board watcher: running, heartbeat 0m ago", "note": "audit miss"},
     {"id": "audit-agents", "category": "guard", "prompt": "how are the agents doing", "expect": [], "stale": [],
-     "verified": "answered by the Agents line (not a state id); stored states here are noise", "note": "noise guard; the agents line is not scored"}
+     "verified": "answered by the Agents line (not a state id); stored states here are noise", "note": "noise guard; the agents line is not scored"},
+    {"id": "hier-one-flag", "category": "hierarchy", "prompt": "is pdf-converter-service-enabled on in production", "expect": [[2355, 2461, 2356, 2835, 2836], [2523, 408, 2834, 2522]],
+     "stale": [436, 2936],
+     "verified": "added 2026-11-23 (sk-improve2): leaf flag states (#2355 on with fallthrough false, #2835 rules) plus the parent LaunchDarkly's how-to-read-production-state (#2523/#408/#2834); #436 (twilio limiter) and #2936 (recover-unsent) are sibling flags' states and must stay out. Ids exist in the 11-23 snapshot and the live store",
+     "note": "hierarchy: a named leaf brings its ancestors, never a sibling leaf"},
+    {"id": "hier-two-flags", "category": "hierarchy", "prompt": "pdf-converter-service-enabled and receipting-recover-unsent-email-receipts in production",
+     "expect": [[2355, 2461, 2356, 2835, 2836], [2936]], "stale": [436],
+     "verified": "added 2026-11-23: two named leaves both surface (#2355 family and #2936); the unnamed sibling #436 stays out",
+     "note": "hierarchy: two named leaves"},
+    {"id": "hier-parent-only", "category": "hierarchy", "prompt": "how do I read a LaunchDarkly flag's production state", "expect": [[2523, 408, 2834, 2522]],
+     "stale": [2355, 2461, 2936, 436],
+     "verified": "added 2026-11-23: the parent's how-to (#2523 environments.<env>.on ..., #2522 curl) and none of the children's own values",
+     "note": "hierarchy: naming only the parent gives the parent, not every child"}
   ]
 }

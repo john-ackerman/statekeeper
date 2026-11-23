@@ -120,6 +120,31 @@ ANCESTOR_SLACK = 0.10      # an ancestor with many states contributes only those
 NAME_ONLY_WRITERS = ("import:conversation",)   # bulk-extracted from old conversations: a low-trust tier until reviewed or confirmed
 
 
+LEAF_SPECIFIC_MAX = 12     # a thing filed under a parent with nothing under it is a leaf: naming it shows its states up to this many
+
+
+def _subsumed(name: str, others: list[str], text: str) -> bool:
+    """Said only as part of a longer name the input also says: "pdf-converter" inside "pdf-converter-service-enabled" names the flag, not the
+    converter. Said on its own as well ("pdf-converter and pdf-converter-service-enabled"), it is named."""
+    seq, mine = words(text), words(name)
+    if not mine:
+        return False
+    for o in others:
+        theirs = words(o)
+        if len(theirs) <= len(mine):
+            continue
+        inside = sum(1 for i in range(len(theirs) - len(mine) + 1) if theirs[i:i + len(mine)] == mine)
+        said = occurrences(seq, o)                                     # the longer name must be said, not only resolved from a number
+        if inside and said and occurrences(seq, name) <= inside * said:
+            return True
+    return False
+
+
+def _stem_key(name: str) -> tuple[str, ...]:
+    """A name's words cut to five letters: "board watcher" and "board-watch" are one thing spelled two ways, never each other's sibling."""
+    return tuple(w[:5] for w in _WORDS.findall(name.lower()))
+
+
 def name_only(s: State) -> bool:
     """A state that reaches an input only through its thing's name (or a number it carries): extracted in bulk from old conversations, and not yet
     reviewed (still 'extracted' trust) or confirmed by anyone."""
@@ -434,7 +459,14 @@ def select(store: Store, text: str, embedder: Optional[Embedder], *, floor: floa
         for tid in {s.thing_id, s.object_id} - {None}:
             standing_count[tid] = standing_count.get(tid, 0) + 1
     all_things = store.things()
-    parents = {t.parent_id for t in all_things if t.parent_id is not None}
+    # a container many things are filed under (a repo, a build definition, the board's asks) is generic, so naming it is not enough; a thing with a
+    # few sub-things (a ticket and its PRs, "board watcher" and its Monitor) is still specific
+    child_count: dict[int, int] = {}
+    for t in all_things:
+        if t.parent_id is not None:
+            child_count[t.parent_id] = child_count.get(t.parent_id, 0) + 1
+    parents = {p for p, n in child_count.items() if n > SPECIFIC_MAX} if HIERARCHY else set(child_count)
+    leaves_filed = {t.id for t in all_things if t.parent_id is not None and t.id not in child_count} if HIERARCHY else set()
     # the hierarchy (topics.TopicTree: parent_id plus name containment): the most specific named things are the leaves of what the input names;
     # their ancestors' states come along, their siblings (and the siblings' sub-things) stay out unless the input names them too
     ancestor_of: set[int] = set()
@@ -442,6 +474,11 @@ def select(store: Store, text: str, embedder: Optional[Embedder], *, floor: floa
     if HIERARCHY:
         from .topics import TopicTree
         tt = TopicTree(all_things)
+        # a name said only inside a longer named name that it is not above ("pdf-converter" inside the flag "pdf-converter-service-enabled")
+        # is not named; one that is above any named thing ("DocRaptor" in "DocRaptor fallback") stays named
+        above = {a for t2, o in named.items() if o[1] == "named" for a in tt.ancestors(t2)}
+        named = {tid: v for tid, v in named.items()
+                 if tid in above or not _subsumed(v[0].name, [o[0].name for t2, o in named.items() if t2 != tid and o[1] == "named"], text)}
         named_ids = {tid for tid, (_t, why, _s) in named.items() if why == "named"}
         leaves = {tid for tid in named_ids if not (tt.descendants(tid, limit=400) & named_ids)}
         filed_under: dict[int, set[int]] = {}                         # explicit filing only (parent_id): name containment is too loose to exclude by
@@ -455,7 +492,7 @@ def select(store: Store, text: str, embedder: Optional[Embedder], *, floor: floa
             p = by_id[leaf].parent_id if leaf in by_id else None
             while p is not None and p in by_id:
                 for c in filed_under.get(p, ()):
-                    if c != leaf and c not in ups and c not in named_ids:
+                    if c != leaf and c not in ups and c not in named_ids and _stem_key(by_id[c].name) != _stem_key(by_id[leaf].name):
                         siblings |= {c} | tt.descendants(c, limit=400)
                 p = by_id[p].parent_id
         ancestor_of -= named_ids
@@ -579,7 +616,7 @@ def select(store: Store, text: str, embedder: Optional[Embedder], *, floor: floa
             c = None                                                  # surfaces only through its own name
         why_named = (lambda h: {"via": h[1].split()[0], "thing": h[0].name})
         # naming is enough on its own only for the thing's own states, spelled whole, when the thing is specific
-        specific = own is not None and (own[1] == "named" or own[2] >= CLOSE_SPELLING) and (own_count.get(s.thing_id, 0) <= SPECIFIC_MAX and asks_about(text, t.name) if t.kind in ("person", "agent") else standing_count.get(s.thing_id, 0) <= SPECIFIC_MAX) and s.thing_id not in parents \
+        specific = own is not None and (own[1] == "named" or own[2] >= CLOSE_SPELLING) and (own_count.get(s.thing_id, 0) <= SPECIFIC_MAX and asks_about(text, t.name) if t.kind in ("person", "agent") else standing_count.get(s.thing_id, 0) <= (LEAF_SPECIFIC_MAX if s.thing_id in leaves_filed else SPECIFIC_MAX)) and s.thing_id not in parents \
             and s.thing_id not in mentioned_widely and not topical    # on topic: its states must bear on this input (no rotation through them)
         # a PR named by its number: its work notes count as specific too (entity_replaced then keeps only the newest one standing after a merge)
         specific = specific or (own is not None and s.thing_id in by_number and s.volatility == "work")

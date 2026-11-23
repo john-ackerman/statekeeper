@@ -10,6 +10,7 @@ import os  # noqa: E402
 
 # switches a live install sets in the hook environment; the tests describe the defaults, and subprocess hooks inherit os.environ
 os.environ.pop("STATEKEEPER_SESSION_NOTE", None)
+os.environ["STATEKEEPER_PROBES"] = "0"      # the live probes read the work board and spawn a refresher: tests of the hooks leave them out
 
 from statekeeper import Evidence, SqliteStore  # noqa: E402
 

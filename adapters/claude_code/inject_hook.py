@@ -102,6 +102,15 @@ def main() -> int:
         except (OSError, ValueError):
             state = {}
         _, block = shadow_hook.prompt_context(event, store, HttpEmbedder(timeout=1.0), state, state_file, home)
+        if os.environ.get("STATEKEEPER_PROBES", "1").strip().lower() not in shadow_hook.OFF:
+            try:
+                import probes                                         # what is true right now: abnormal, or changed since this session's last turn
+                live = probes.live_block(home, str(event.get("session_id") or "unknown"))
+                if live:                                              # first, so the 4000-char cap never cuts it
+                    rest = block[len(shadow_hook.MARK):] if block.startswith(shadow_hook.MARK) else block
+                    block = shadow_hook.MARK + live + ("\n\n" + rest if rest else "")
+            except BaseException:
+                pass
         try:
             import tool_hook
             if not shadow_hook.is_automated((event.get("prompt") or "").strip()):

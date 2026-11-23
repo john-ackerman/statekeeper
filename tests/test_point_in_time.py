@@ -45,5 +45,34 @@ class PointInTime(unittest.TestCase):
         self.assertNotIn("as of", out.block)
 
 
+class ImportedConversation(unittest.TestCase):
+    """States extracted from old conversations are a low-trust tier: until reviewed or confirmed, only their thing's name brings them up."""
+
+    def setUp(self):
+        self.s = fresh_store()
+
+    def add(self, writer, thing="slack relay"):
+        return self.s.add_state(thing, "the board watch relay posts to slack", evidence=[ev("c1", "x")], writer=writer, trust="extracted",
+                                learned_how="inferred", volatility="stable")
+
+    def test_an_unreviewed_conversation_state_does_not_route_by_meaning(self):
+        st = self.add("import:conversation:run1")
+        self.assertNotIn(f"#{st.id}", surface(self.s, "is the slack board watch working", ThemeEmbedder(), floor=0.5, today=TODAY).block)
+
+    def test_naming_its_thing_shows_it(self):
+        st = self.add("import:conversation:run1")
+        self.assertIn(f"#{st.id}", surface(self.s, "the slack relay", ThemeEmbedder(), floor=0.5, today=TODAY).block)
+
+    def test_once_confirmed_it_routes_like_any_state(self):
+        st = self.add("import:conversation:run1")
+        self.s.accept(st.id, "reviewed", actor="owner")
+        self.s.confirm(st.id, actor="owner", at="2026-11-22 09:00:00")
+        self.assertIn(f"#{st.id}", surface(self.s, "is the slack board watch working", ThemeEmbedder(), floor=0.5, today=TODAY).block)
+
+    def test_other_extracted_states_are_unaffected(self):
+        st = self.add("extractor:abc")
+        self.assertIn(f"#{st.id}", surface(self.s, "is the slack board watch working", ThemeEmbedder(), floor=0.5, today=TODAY).block)
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -115,6 +115,15 @@ def as_of(s: State) -> str:
     return (s.as_of_utc or s.recorded_utc or "")[:10]
 
 
+NAME_ONLY_WRITERS = ("import:conversation",)   # bulk-extracted from old conversations: a low-trust tier until reviewed or confirmed
+
+
+def name_only(s: State) -> bool:
+    """A state that reaches an input only through its thing's name (or a number it carries): extracted in bulk from old conversations, and not yet
+    reviewed (still 'extracted' trust) or confirmed by anyone."""
+    return s.writer.startswith(NAME_ONLY_WRITERS) and s.trust == "extracted" and not s.confirmed_utc
+
+
 def point_in_time(s: State) -> bool:
     """A status that was true at a date ('work', unkeyed). Facts imported from the earlier store that it marked as NOT a state (durable facts that
     only got the default volatility) are not point-in-time."""
@@ -526,6 +535,8 @@ def select(store: Store, text: str, embedder: Optional[Embedder], *, floor: floa
         hit = own or obj
         if (own is None or own[1] != "named") and stale_live(s, today):
             continue                                                  # a live value nobody re-read lately is not current: only naming its thing shows it (marked STALE)
+        if own is None and name_only(s):
+            continue                                                  # bulk-imported, unreviewed: only its thing's name brings it up
         if own is None and stale_work(s, today):
             continue                                                  # a week-old unconfirmed status: only its thing's name brings it back (dated)
         if s.id in meaning_off:

@@ -6,7 +6,14 @@ path unless noted. Numbers are for the ORIGINAL 55 cases; the cases added later 
 
 ## 2026-11-25 per-prompt block: less noise (sk-inject-noise)
 
+Measured on a verified copy of the live store taken 2026-11-25 10:20 (`shadow-20261125-102033.db`), hook mode, both sets before and after with the
+same copy. The old audit set has 13 cases; 3 per-prompt cases were added to it (16 now). `pp-*` cases are listed apart so the old numbers stay comparable.
+
 - `sk.py` prints with `errors="replace"`: `search`/`recall`/`show` crashed on an emoji state on a cp1252 console. No recall effect.
+- B. `surface(..., per_prompt=True)` (the inject hook passes it; `sk recall` and the eval's recall mode do not): an open board ask no longer reaches the
+  per-prompt block by meaning, and a generated ask ("board ask auto-...", made by the board from a PR's or an agent's state) only when the input says its
+  id: the "Live now" probes already list open asks, and a PR number ("is 3443 approved") named the ask generated from that PR, which then sat beside the
+  PR's own values. Done asks and the "the asks" roll-up are unchanged. The probes switch (`STATEKEEPER_PROBES=0`) does not bring them back in the block.
 
 ## 2026-11-23 hierarchy filing, re-parent, conversation import gate (sk-improve2)
 

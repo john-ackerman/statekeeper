@@ -37,6 +37,15 @@
     {"id": "hier-parent-only", "category": "hierarchy", "prompt": "how do I read a LaunchDarkly flag's production state", "expect": [[2523, 408, 2834, 2522]],
      "stale": [2355, 2461, 2936, 436],
      "verified": "added 2026-11-23: the parent's how-to (#2523 environments.<env>.on ..., #2522 curl) and none of the children's own values",
-     "note": "hierarchy: naming only the parent gives the parent, not every child"}
+     "note": "hierarchy: naming only the parent gives the parent, not every child"},
+    {"id": "pp-pr-number-not-ask", "category": "per-prompt", "prompt": "is 3443 approved yet", "expect": [[9813, 10040, 10189]], "stale": [10285],
+     "verified": "added 2026-11-25 (sk-inject-noise): PR 3443's own keyed values (#9813 review, #10040 state, #10189 CI); #10285 is the generated open ask 'Nobody is working this: VirtuousV2#3443', which the live probes show and the PR number must not bring up",
+     "note": "per-prompt block: a number names the PR, not the ask generated from it"},
+    {"id": "pp-ticket-not-auto-ask", "category": "per-prompt", "prompt": "what is the status of CRM-3385", "expect": [], "stale": [10595],
+     "verified": "added 2026-11-25: #10595 is the generated open ask 'Nobody is working CRM-3385' (probes show it); agents are answered by the Agents line",
+     "note": "per-prompt block: a ticket key does not bring up the generated ask"},
+    {"id": "pp-ask-by-id", "category": "per-prompt", "prompt": "what is board ask auto-cons-no-live-agent-crm-3385 about", "expect": [[10595]], "stale": [],
+     "verified": "added 2026-11-25: saying the ask's own id keeps it reachable",
+     "note": "per-prompt block: an explicitly named ask still surfaces"}
   ]
 }

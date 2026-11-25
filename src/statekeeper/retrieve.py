@@ -410,7 +410,7 @@ def candidates(store: Store, text: str, embedder: Optional[Embedder], floor: flo
 def select(store: Store, text: str, embedder: Optional[Embedder], *, floor: float, max_things: int = 3, states_each: int = 2,
            exclude_kinds: tuple = (), exclude_names: tuple = (), skip_state_ids: frozenset = frozenset(), max_states: int = MAX_STATES,
            topic: Optional[dict[int, float]] = None, info: Optional[dict] = None, news: frozenset = frozenset(),
-           today: Optional[datetime] = None) -> tuple[list[Item], list[State], list[Item]]:
+           today: Optional[datetime] = None, per_prompt: bool = False) -> tuple[list[Item], list[State], list[Item]]:
     """State-first selection: every state shown must itself bear on the input, not merely belong to a thing whose name was said.
 
     A state qualifies when
@@ -426,6 +426,8 @@ def select(store: Store, text: str, embedder: Optional[Embedder], *, floor: floa
     still not enough alone, but its states need less meaning (TOPIC_SLACK below the floor, no rare word) to qualify, so the relevant ones surface.
     When the conversation moves on the score decays and the word is generic again. Usefulness weights (Store.state_weights, set by the nightly job from outcomes) nudge a state's
     meaning score by at most a few hundredths: a state shown again and again and never used, or said to be noise, needs to be a little closer.
+    `per_prompt` (the inject hook) shapes the block that goes in front of every prompt: an open board ask reaches it only through the words of its own
+    title, a generated one ("board ask auto-...") only through its id (the live probes already show the open asks).
     Returns (items shown, all qualifying states in rank order, items dropped by the caps); `info`, when given, receives the named thing ids."""
     standing_all = store.searchable_states()
     today = today or datetime.now(timezone.utc)
@@ -626,6 +628,9 @@ def select(store: Store, text: str, embedder: Optional[Embedder], *, floor: floa
         # a PR named by its number: its work notes count as specific too (entity_replaced then keeps only the newest one standing after a merge)
         specific = specific or (own is not None and s.thing_id in by_number and s.volatility == "work")
         if s.state_key:
+            if per_prompt and s.state_key == "ask.state" and t.name.startswith("board ask auto-") and not s.text.startswith("done") \
+                    and t.name[len("board ask "):].lower() not in text.lower():
+                continue                                              # a generated ask (the board makes them from a PR's or an agent's state): the PR's own values and the probes cover it
             if own is not None and own[1] == "named":  # a named thing's current values; never reached by meaning alone (they are short labels)
                 scored.append((2.0, s))
                 reasons[s.id] = {"via": "keyed", "thing": t.name}
@@ -633,9 +638,10 @@ def select(store: Store, text: str, embedder: Optional[Embedder], *, floor: floa
                 # an ask is named by an opaque id, but its value carries a title: it may reach an input by its title's meaning or two of its rare words
                 fold = lambda ws: {w[:-1] if w.endswith("s") and len(w) > 5 else w for w in ws}   # "rollouts" says "rollout"
                 title_words = sorted(fold(terms(text)) & fold(terms(s.text.split(" · ", 3)[-1])))[:4]
-                if (c is not None and c >= floor) or len(title_words) >= 2:
+                by_meaning = c is not None and c >= floor and not (per_prompt and not s.text.startswith("done"))   # an open ask: the probes show it
+                if by_meaning or len(title_words) >= 2:
                     scored.append((max(c or 0.0, floor), s))
-                    reasons[s.id] = {"via": "meaning" if c is not None and c >= floor else "words", "thing": t.name,
+                    reasons[s.id] = {"via": "meaning" if by_meaning else "words", "thing": t.name,
                                      **({"words": title_words} if title_words else {})}
             continue
         shared_words = sorted(asked & state_terms.get(s.id, set()))[:4]
@@ -895,7 +901,7 @@ def _agents_line(store: Store, text: str, today: datetime, skip: frozenset) -> t
 def surface(store: Store, text: str, embedder: Optional[Embedder] = None, *, floor: Optional[float] = None, max_things: int = 3,
             states_each: int = 2, budget: int = 2500, today: Optional[datetime] = None, log_turn: Optional[str] = None,
             exclude_kinds: tuple = (), exclude_names: tuple = (), skip_state_ids: frozenset = frozenset(), max_states: int = MAX_STATES,
-            topic: Optional[dict[int, float]] = None, news: frozenset = frozenset()) -> Surfaced:
+            topic: Optional[dict[int, float]] = None, news: frozenset = frozenset(), per_prompt: bool = False) -> Surfaced:
     """The state block for an input (see `select` for what qualifies): at most `max_things` things and `max_states` states, only the newest about any
     one subject, one line each with ONE trust marker and one short evidence pointer, within `budget` characters, saying what it left out. Empty when
     nothing bears on the input."""
@@ -904,7 +910,7 @@ def surface(store: Store, text: str, embedder: Optional[Embedder] = None, *, flo
     info: dict = {}
     items, _, dropped = select(store, text, embedder, floor=floor, max_things=max_things, states_each=states_each, exclude_kinds=exclude_kinds,
                                exclude_names=exclude_names, skip_state_ids=skip_state_ids, max_states=max_states, topic=topic, info=info, news=news,
-                               today=today)
+                               today=today, per_prompt=per_prompt)
     named = info.get("named", [])
     agents, agent_ids = _agents_line(store, text, today, skip_state_ids)
     if not items and not agents:

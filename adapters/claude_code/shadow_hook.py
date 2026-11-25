@@ -207,7 +207,7 @@ def prompt_context(event: dict, store, embedder, state: dict, state_file: Path, 
         on_topic_skip = set(i for r in recent for i in r.get("states", []))
         skip = {i for i in skip if i in on_topic_skip or (store.get_state(i) and store.get_state(i).thing_id not in {t for t, v in topic.items() if v >= 0.6})}
         out = surface(store, prompt, embedder, log_turn=turn_ref, floor=LIVE_FLOOR, max_things=LIVE_MAX_THINGS, budget=LIVE_BUDGET, exclude_kinds=("agent", "person"),
-                      exclude_names=("working note",), skip_state_ids=frozenset(skip), max_states=LIVE_MAX_STATES, topic=topic, news=frozenset(news))
+                      exclude_names=("working note",), skip_state_ids=frozenset(skip), max_states=LIVE_MAX_STATES, topic=topic, news=frozenset(news), per_prompt=True)
     block = (MARK + out.block) if out.block else ""
     store.record_turn_text(turn_ref, "prompt", prompt[:20000], session_id=session)
     store.record_injection(turn_ref, "statekeeper", "UserPromptSubmit", "concept_map", block)

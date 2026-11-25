@@ -1,5 +1,7 @@
-"""The per-prompt block (`surface(..., per_prompt=True)`, what the inject hook asks for) leaves out what the live probes already show:
-open board asks reach it only through their own words (a generated ask only through its id). `sk recall` and the default `surface` are unchanged."""
+"""The per-prompt block (`surface(..., per_prompt=True)`, what the inject hook asks for) leaves out what the live probes already show and nudges the
+ranking: open board asks reach it only through their own words (a generated ask only through its id), standing knowledge (decisions, preferences,
+constraints) ranks just above, and a progress note just below, a state of the same closeness. `sk recall` and the default
+`surface` are unchanged."""
 import unittest
 
 from support import ThemeEmbedder, ev, fresh_store
@@ -51,6 +53,28 @@ class PerPromptBlock(unittest.TestCase):
     def test_asking_for_the_asks_still_lists_the_open_ones(self):
         a = self.ask("ask-1", "open · decide · since 2026-11-23 · Plan the LaunchDarkly flag rollouts")
         self.assertIn(a.id, self.ids("what is the priority order of asks", per_prompt=True))
+
+    # C: standing knowledge ahead of status. The theme embedder gives "datepicker", "donor ...", "pdf" and "slack" each their own axis, so a prompt
+    # naming all four is about equally close to a state about any one of them, and the states are not about the same subject as each other.
+    PROMPT = "datepicker donor pdf slack"
+
+    def test_a_decision_outranks_a_closer_status_note_when_one_slot_is_left(self):
+        status = self.add("Rollout note", "datepicker pdf", volatility="work")
+        decision = self.add("Receipt rule", "donor pdf settled", volatility="stable", kind="rule")
+        self.assertEqual([status.id], self.ids(self.PROMPT, floor=0.45, max_things=1, max_states=1))
+        self.assertEqual([decision.id], self.ids(self.PROMPT, floor=0.45, max_things=1, max_states=1, per_prompt=True))
+
+    def test_a_progress_note_ranks_below_a_neutral_state_of_the_same_closeness(self):
+        progress = self.add("Notes", "datepicker agent started")
+        neutral = self.add("Notes", "slack colors blue")
+        self.assertEqual([progress.id], self.ids(self.PROMPT, floor=0.45, max_things=1, max_states=1))
+        self.assertEqual([neutral.id], self.ids(self.PROMPT, floor=0.45, max_things=1, max_states=1, per_prompt=True))
+
+    def test_a_decision_stored_as_work_counts_as_standing_knowledge_by_its_wording(self):
+        status = self.add("Rollout note", "datepicker pdf", volatility="work")
+        decision = self.add("Receipt rule", "donor pdf we decided", volatility="work")
+        self.assertEqual([status.id], self.ids(self.PROMPT, floor=0.45, max_things=1, max_states=1))
+        self.assertEqual([decision.id], self.ids(self.PROMPT, floor=0.45, max_things=1, max_states=1, per_prompt=True))
 
 
 if __name__ == "__main__":

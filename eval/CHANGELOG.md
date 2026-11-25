@@ -14,6 +14,22 @@ same copy. The old audit set has 13 cases; 3 per-prompt cases were added to it (
   per-prompt block by meaning, and a generated ask ("board ask auto-...", made by the board from a PR's or an agent's state) only when the input says its
   id: the "Live now" probes already list open asks, and a PR number ("is 3443 approved") named the ask generated from that PR, which then sat beside the
   PR's own values. Done asks and the "the asks" roll-up are unchanged. The probes switch (`STATEKEEPER_PROBES=0`) does not bring them back in the block.
+- C. Same flag: among states that qualified by closeness (meaning, words, topic, asked; never named, specific or ancestor hits, and never past an
+  ancestor's 0.95), a decision/preference/constraint ranks 0.05 above, and a progress note ("agent started", "CI green", "PR is open" in prose) 0.05
+  below, one of the same closeness. "Decision" is `kind=rule`, volatility rule/stable, or decision wording, because the stored type alone misses most
+  of them (most extracted decisions are volatility `work`). Neutral on both sets (no case moved); the ranking effect is pinned by unit tests only.
+  Not done, with the reason: capping or demoting the unreviewed tier. The expected decisions are themselves unreviewed (`extracted`, e.g. #130, #179,
+  #408), and a 0.03 demotion cost hier-parent-only rank 1; a hard cap of one unreviewed state cost three rank-1 hits on the 55-case set. A nudge of 0.10
+  (and 0.20 earlier) cost `dec-search-linear-first` rank 1 on the 55-case set, so 0.05 stays.
+
+| Set (copy 2026-11-25) | hit@1 before / after | hit@all before / after | empty | noise/prompt before / after | stale cases before / after | mean tokens |
+|---|---|---|---|---|---|---|
+| cases.json (55) | 0.364 / 0.364 | 0.473 / 0.473 | 0.109 / 0.109 | 1.47 / 1.47 | 1 / 1 | 138.4 / 137.2 |
+| audit, original 13 | 0.385 / 0.385 | 0.385 / 0.385 | 0.308 / 0.308 | 1.62 / 1.62 | 0 / 0 | 153 / 151.5 |
+| audit incl. 3 `pp-*` cases (16) | 0.375 / 0.375 | 0.438 / 0.438 | 0.250 / 0.250 | 1.62 / 1.81 | 2 / 0 | 165.1 / 161.2 |
+
+The noise rise on the 16-case set is the two `pp-*` guard cases: the generated ask (counted as stale) leaves and an on-topic state about the ticket
+takes its slot (counted as noise because the case expects nothing).
 
 ## 2026-11-23 hierarchy filing, re-parent, conversation import gate (sk-improve2)
 

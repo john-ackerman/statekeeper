@@ -151,6 +151,24 @@ def name_only(s: State) -> bool:
     return s.writer.startswith(NAME_ONLY_WRITERS) and s.trust == "extracted" and not s.confirmed_utc
 
 
+ANCESTOR_FLOOR_SCORE = 0.949   # an ancestor's state scores 0.95 + closeness/20; a nudge never lifts a closeness hit above that
+STANDING_NUDGE = 0.05        # per-prompt: a decision/preference/constraint ranks this far above, and a progress/status note this far below, a state of the same closeness
+NUDGED_ROUTES = ("meaning", "words", "topic", "asked")     # only states that qualified by closeness are nudged; named, specific and ancestor hits keep their rank
+_DECISION_CUE = re.compile(r"\b(decided|decision|standing rule|rule|prefers?|always|never|must|do not|don't|settled|policy|constraint|agreed)\b", re.I)
+_PROGRESS_CUE = re.compile(r"\b(ci (is )?(green|red)|checks? passed|is (open|draft|merged)|agent\b.{0,40}\b(running|started|finished|reported|stalled)|"
+                           r"(started|finished|running|stalled|waiting)\b.{0,30}\bagent)\b", re.I)
+
+
+def standing_knowledge(s: State) -> bool:
+    """A decision, preference or constraint. The stored type is a weak signal (most extracted decisions are volatility 'work'), so the wording counts too."""
+    return s.state_key is None and (s.kind == "rule" or s.volatility in ("rule", "stable") or bool(_DECISION_CUE.search(s.text)))
+
+
+def progress_note(s: State) -> bool:
+    """An agent's progress or a PR's/CI's status in prose: the live probes and the keyed values cover what is current."""
+    return s.state_key is None and not standing_knowledge(s) and bool(_PROGRESS_CUE.search(s.text))
+
+
 def numbered(name: str) -> bool:
     """A thing whose name carries a ticket, PR or build number ("CRM-3148", "PR #3376")."""
     from .identifiers import numbers_in_text
@@ -427,7 +445,8 @@ def select(store: Store, text: str, embedder: Optional[Embedder], *, floor: floa
     When the conversation moves on the score decays and the word is generic again. Usefulness weights (Store.state_weights, set by the nightly job from outcomes) nudge a state's
     meaning score by at most a few hundredths: a state shown again and again and never used, or said to be noise, needs to be a little closer.
     `per_prompt` (the inject hook) shapes the block that goes in front of every prompt: an open board ask reaches it only through the words of its own
-    title, a generated one ("board ask auto-...") only through its id (the live probes already show the open asks).
+    title (the live probes already show the open asks), standing knowledge (rule/stable states: decisions, preferences, constraints) ranks above status
+    lines of about the same closeness (the unreviewed tier is not demoted: most extracted decisions are unreviewed, and demoting them cost rank 1).
     Returns (items shown, all qualifying states in rank order, items dropped by the caps); `info`, when given, receives the named thing ids."""
     standing_all = store.searchable_states()
     today = today or datetime.now(timezone.utc)
@@ -705,6 +724,13 @@ def select(store: Store, text: str, embedder: Optional[Embedder], *, floor: floa
         if s.id not in best or score > best[s.id][0]:
             best[s.id] = (score, s)
     scored = list(best.values())
+    if per_prompt:
+        def nudge(sc: float, s: State) -> float:
+            if reasons.get(s.id, {}).get("via") not in NUDGED_ROUTES:
+                return sc
+            up = STANDING_NUDGE if standing_knowledge(s) else -STANDING_NUDGE if progress_note(s) else 0.0
+            return min(sc + up, max(sc, ANCESTOR_FLOOR_SCORE))       # never lifted past an ancestor's hit (0.95 and up), which it did not beat before
+        scored = [(nudge(sc, s), s) for sc, s in scored]
     scored.sort(key=lambda x: (-x[0], x[1].id))
     # the unreviewed tier ranks below everything else and takes part in none of the replacements below (a newer imported note must not hide a
     # standing one): it only fills what is left after every other qualifying state

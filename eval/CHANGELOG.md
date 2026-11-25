@@ -4,6 +4,10 @@ Every change here was measured with `python eval/run_eval.py` on the frozen snap
 path unless noted. Numbers are for the ORIGINAL 55 cases; the cases added later are reported separately so the baseline stays comparable.
 "strict" and "lenient" are hit-any. Stale = cases (of 15 with a check) that injected a must-not state.
 
+## 2026-11-25 per-prompt block: less noise (sk-inject-noise)
+
+- `sk.py` prints with `errors="replace"`: `search`/`recall`/`show` crashed on an emoji state on a cp1252 console. No recall effect.
+
 ## 2026-11-23 hierarchy filing, re-parent, conversation import gate (sk-improve2)
 
 Measured on a verified copy of the live store taken 2026-11-23 11:42 (not the frozen snapshot: the hierarchy needs today's things), all three

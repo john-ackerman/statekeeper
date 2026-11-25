@@ -150,6 +150,9 @@ def nearest(store, text: str, embedder, n: int = 3) -> list[str]:
 
 
 def main(argv: list[str] | None = None) -> int:
+    for stream in (sys.stdout, sys.stderr):                  # a console that cannot show a character (cp1252, an emoji) prints "?" instead of crashing
+        if hasattr(stream, "reconfigure"):
+            stream.reconfigure(errors="replace")
     ap = argparse.ArgumentParser(prog="sk")
     ap.add_argument("--db", default=os.environ.get("STATEKEEPER_DB") or DEFAULT_DB)
     ap.add_argument("--actor", default=os.environ.get("STATEKEEPER_ACTOR") or "agent")

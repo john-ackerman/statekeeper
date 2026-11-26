@@ -4,6 +4,21 @@ Every change here was measured with `python eval/run_eval.py` on the frozen snap
 path unless noted. Numbers are for the ORIGINAL 55 cases; the cases added later are reported separately so the baseline stays comparable.
 "strict" and "lenient" are hit-any. Stale = cases (of 15 with a check) that injected a must-not state.
 
+## 2026-11-25 experiment: Haiku as the store's interface (branch experiment/haiku-interface, not merged)
+
+Code in `experiments/haiku_interface/`. Copy of the live store taken 2026-11-25 22:41; nothing live was read by a child session or written.
+Child `claude -p` calls run with `--safe-mode --setting-sources "" --strict-mcp-config --tools ""` and STATEKEEPER_SHADOW=0: a sentinel hook
+passed via `--settings` fires without these flags and not with them (`check_isolation.py`).
+
+Reader (one Haiku call picks <= 3 things from the thing tree, then their current states + small ancestors, hook budget): hit@all / noise per prompt,
+old hook -> reader. cases.json original 55: 0.473 / 1.47 -> 0.509 / 3.29 (hit@1 0.364 -> 0.218, stale cases 1 -> 5). Audit 16: 0.375 -> 0.250.
+New vague set (12, `cases-vague-20261125.json`, one judge): 0.333 / 0.33 -> 0.500 / 3.42. The two miss different cases: showing both blocks gives
+0.691 on the 55 (noise 4.76). Reader latency median 2.9 s, p90 3.6 s (old ~1.4 s), ~28K input tokens per call (the tree is ~51K chars).
+
+Writer (12 real turns from 2026-11-25, applied directly): 27 proposals, 2 refused by the quote check, 22 adds, 3 confirms, 0 supersedes, 0 new
+things. Judged wrong or doubtful: 1 duplicate (a decision already stored on a thing not among the candidates), 1 older value added beside a newer
+one (replay order), 1 wrong thing, 1 question stated as a rule, 2 transient status lines. Median 6.7 s per call. `writer.py --undo all` restored the copy.
+
 ## 2026-11-25 per-prompt block: less noise (sk-inject-noise)
 
 Measured on a verified copy of the live store taken 2026-11-25 10:20 (`shadow-20261125-102033.db`), hook mode, both sets before and after with the
